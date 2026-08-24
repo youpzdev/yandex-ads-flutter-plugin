@@ -124,7 +124,12 @@ class _BannerAdPageState extends State<BannerAdPage> with TextLogger {
       });
     }
 
-    _banner!.load(_createAdRequest());
+    try {
+      await _banner!.load(_createAdRequest());
+    } catch (error) {
+      logMessage('banner ad load failed: $error');
+      if (mounted) setState(() => isLoading = false);
+    }
   }
 
   void _subscribeToBanner(BannerAd banner) {
