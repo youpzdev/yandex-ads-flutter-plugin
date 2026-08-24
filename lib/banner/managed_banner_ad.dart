@@ -63,6 +63,13 @@ class ManagedBannerAdController extends ChangeNotifier {
   /// How long a single load may stay unanswered before it counts as failed.
   final Duration loadTimeout;
 
+  /// Share of the placement that must be on screen for it to count as seen.
+  ///
+  /// Buyers pay for impressions the user could actually see, so the refresh
+  /// clock only runs while at least this much of the banner is visible. The
+  /// default of 0.5 follows the common display viewability bar.
+  final double visibilityThreshold;
+
   Duration get refreshInterval => refreshPolicy.refreshInterval;
   Duration get retryInterval => refreshPolicy.retryInterval;
 
@@ -74,6 +81,8 @@ class ManagedBannerAdController extends ChangeNotifier {
   DateTime? _visibleSince;
   late Duration _remaining;
   bool _visible = false;
+  double _visibleFraction = 0;
+  Duration _viewableDuration = Duration.zero;
   bool _started = false;
   bool _loading = false;
   bool _loadAttempted = false;
@@ -87,6 +96,7 @@ class ManagedBannerAdController extends ChangeNotifier {
     Duration? refreshInterval,
     Duration? retryInterval,
     this.loadTimeout = const Duration(seconds: 30),
+    this.visibilityThreshold = 0.5,
   }) : refreshPolicy = refreshPolicy ??
             ManagedBannerRefreshPolicy(
               refreshInterval: refreshInterval ??
@@ -104,6 +114,13 @@ class ManagedBannerAdController extends ChangeNotifier {
     if (loadTimeout <= Duration.zero) {
       throw ArgumentError.value(loadTimeout, 'loadTimeout', 'Must be positive.');
     }
+    if (visibilityThreshold <= 0 || visibilityThreshold > 1) {
+      throw ArgumentError.value(
+        visibilityThreshold,
+        'visibilityThreshold',
+        'Must be greater than 0 and at most 1.',
+      );
+    }
     _remaining = this.refreshPolicy.refreshInterval;
   }
 
@@ -112,6 +129,29 @@ class ManagedBannerAdController extends ChangeNotifier {
   bool get isLoading => _loading;
 
   bool get isDestroyed => _destroyed;
+
+  /// Share of the placement that is on screen right now.
+  double get visibleFraction => _visibleFraction;
+
+  /// Time this placement spent above [visibilityThreshold].
+  ///
+  /// Report it next to impressions to see how much of the inventory was
+  /// actually viewable.
+  Duration get viewableDuration {
+    final since = _visibleSince;
+    if (!_visible || since == null) return _viewableDuration;
+    return _viewableDuration + DateTime.now().difference(since);
+  }
+
+  /// Reports how much of the placement is on screen.
+  ///
+  /// The widget calls this after every frame; call it yourself only when the
+  /// placement lives outside [ManagedBannerAdWidget].
+  void setVisibleFraction(double fraction) {
+    if (_destroyed) return;
+    _visibleFraction = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
+    setVisible(_visibleFraction >= visibilityThreshold);
+  }
 
   Future<void> start() async {
     if (_destroyed) {
@@ -171,9 +211,13 @@ class ManagedBannerAdController extends ChangeNotifier {
   void _pauseVisibleTime() {
     if (!_visible) return;
     final startedAt = _visibleSince;
-    if (startedAt != null && !_loading) {
+    if (startedAt != null) {
       final elapsed = DateTime.now().difference(startedAt);
-      _remaining = elapsed >= _remaining ? Duration.zero : _remaining - elapsed;
+      _viewableDuration += elapsed;
+      if (!_loading) {
+        _remaining =
+            elapsed >= _remaining ? Duration.zero : _remaining - elapsed;
+      }
     }
     _visible = false;
     _visibleSince = null;
@@ -183,6 +227,10 @@ class ManagedBannerAdController extends ChangeNotifier {
   void _restartVisibleClock() {
     _refreshTimer?.cancel();
     if (!_visible) return;
+    final since = _visibleSince;
+    if (since != null) {
+      _viewableDuration += DateTime.now().difference(since);
+    }
     _visibleSince = DateTime.now();
     _scheduleRefresh();
   }
@@ -350,35 +398,40 @@ class _ManagedBannerAdWidgetState extends State<ManagedBannerAdWidget>
     if (!mounted) return;
     final renderObject = context.findRenderObject();
     if (renderObject is! RenderBox || !renderObject.hasSize) {
-      widget.controller.setVisible(false);
+      widget.controller.setVisibleFraction(0);
       return;
     }
-    final offset = renderObject.localToGlobal(Offset.zero);
-    final bounds = offset & renderObject.size;
-    final viewport = Offset.zero & MediaQuery.of(context).size;
-    final scrollViewport = RenderAbstractViewport.maybeOf(renderObject);
-    final scrollPosition = _scrollPosition;
-    var inScrollViewport = true;
-    if (scrollViewport != null && scrollPosition != null) {
-      // getOffsetToReveal(0) is the scroll offset of the placement itself.
-      final leading = scrollViewport.getOffsetToReveal(renderObject, 0).offset;
-      final extent = scrollPosition.axis == Axis.vertical
-          ? renderObject.size.height
-          : renderObject.size.width;
-      final firstVisibleOffset = scrollPosition.pixels;
-      final lastVisibleOffset =
-          firstVisibleOffset + scrollPosition.viewportDimension;
-      inScrollViewport = firstVisibleOffset < leading + extent &&
-          lastVisibleOffset > leading;
+    final size = renderObject.size;
+    final area = size.width * size.height;
+    if (area <= 0) {
+      widget.controller.setVisibleFraction(0);
+      return;
     }
-    final visible = _lifecycleState == AppLifecycleState.resumed &&
+
+    final active = _lifecycleState == AppLifecycleState.resumed &&
         // ignore: deprecated_member_use
-        TickerMode.of(context) &&
-        bounds.overlaps(viewport) &&
-        inScrollViewport &&
-        renderObject.size.width > 0 &&
-        renderObject.size.height > 0;
-    widget.controller.setVisible(visible);
+        TickerMode.of(context);
+    if (!active) {
+      widget.controller.setVisibleFraction(0);
+      return;
+    }
+
+    final bounds = renderObject.localToGlobal(Offset.zero) & size;
+    var visible = bounds.intersect(Offset.zero & MediaQuery.of(context).size);
+
+    // A placement inside a scroll view is also clipped by that view.
+    final RenderObject? scrollViewport =
+        RenderAbstractViewport.maybeOf(renderObject);
+    final viewportBox = scrollViewport is RenderBox ? scrollViewport : null;
+    if (viewportBox != null && viewportBox.hasSize) {
+      final viewportBounds =
+          viewportBox.localToGlobal(Offset.zero) & viewportBox.size;
+      visible = visible.intersect(viewportBounds);
+    }
+
+    final width = visible.width > 0 ? visible.width : 0.0;
+    final height = visible.height > 0 ? visible.height : 0.0;
+    widget.controller.setVisibleFraction(width * height / area);
   }
 
   @override

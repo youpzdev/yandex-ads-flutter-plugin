@@ -203,6 +203,38 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  test('the visibility threshold gates loading and refreshing', () async {
+    final controller = ManagedBannerAdController(
+      adSize: const BannerAdSize.inline(width: 320, maxHeight: 100),
+      adRequest: const AdRequest(adUnitId: 'unit'),
+      visibilityThreshold: 0.5,
+      loadTimeout: const Duration(milliseconds: 50),
+    );
+
+    await controller.start();
+
+    controller.setVisibleFraction(0.4);
+    expect(controller.visibleFraction, 0.4);
+    expect(controller.isLoading, isFalse,
+        reason: 'a barely visible placement is not worth a request');
+
+    controller.setVisibleFraction(0.6);
+    expect(controller.isLoading, isTrue);
+
+    await controller.destroy();
+  });
+
+  test('a threshold outside its range is rejected', () {
+    expect(
+      () => ManagedBannerAdController(
+        adSize: const BannerAdSize.inline(width: 320, maxHeight: 100),
+        adRequest: const AdRequest(adUnitId: 'unit'),
+        visibilityThreshold: 0,
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('destroying a banner that never had a platform view succeeds', () async {
     final banner = BannerAd(adSize: const BannerAdSize.sticky(width: 320));
     await banner.destroy();
