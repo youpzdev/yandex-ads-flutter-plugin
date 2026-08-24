@@ -204,6 +204,39 @@ void main() {
     );
   });
 
+  test('native minimum size follows the content padding', () {
+    expect(NativeAdTemplate.media.minimumWidthFor(40), 380);
+    expect(NativeAdTemplate.media.minimumHeightFor(40), 420);
+    expect(NativeAdTemplate.compact.minimumHeightFor(0), 320);
+    expect(
+      () => NativeAd(
+        adRequest: const AdRequest(adUnitId: 'unit'),
+        width: 324,
+        height: 364,
+        style: const NativeAdStyle(contentPadding: 40),
+      ),
+      throwsArgumentError,
+    );
+    final ad = NativeAd(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+      width: 380,
+      height: 420,
+      style: const NativeAdStyle(contentPadding: 40),
+    );
+    addTearDown(ad.destroy);
+  });
+
+  test('native ad destroy survives an already disposed platform view',
+      () async {
+    final ad = NativeAd(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+      width: 324,
+      height: 364,
+    );
+    await ad.destroy();
+    await ad.destroy();
+  });
+
   test('managed refresh policy has safe presets and rejects shorter intervals',
       () {
     expect(

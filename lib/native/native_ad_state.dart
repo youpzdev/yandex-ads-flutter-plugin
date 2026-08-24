@@ -15,33 +15,54 @@ enum NativeAdTemplate {
   compact,
   media;
 
-  int get minimumWidth {
+  static const _defaultContentPadding = 12.0;
+  static const _minimumMediaWidth = 300;
+  static const _fixedVerticalContent = 160;
+
+  int get _mediaHeight {
     switch (this) {
       case NativeAdTemplate.compact:
+        return 160;
       case NativeAdTemplate.media:
-        return 324;
+        return 180;
     }
   }
 
-  int get minimumHeight {
-    switch (this) {
-      case NativeAdTemplate.compact:
-        return 344;
-      case NativeAdTemplate.media:
-        return 364;
-    }
-  }
+  /// Minimum container width for the default content padding.
+  int get minimumWidth => minimumWidthFor(_defaultContentPadding);
 
-  void validateSize({required int width, required int height}) {
-    if (width < minimumWidth) {
+  /// Minimum container height for the default content padding.
+  int get minimumHeight => minimumHeightFor(_defaultContentPadding);
+
+  /// Minimum container width in dp for the given [contentPadding].
+  ///
+  /// Larger padding needs a larger container: the native layers compute the
+  /// same value and refuse to request an ad for a smaller one.
+  int minimumWidthFor(double contentPadding) =>
+      _minimumMediaWidth + 2 * NativeAdStyle._boundedDimension(contentPadding).round();
+
+  /// Minimum container height in dp for the given [contentPadding].
+  int minimumHeightFor(double contentPadding) =>
+      _mediaHeight +
+      _fixedVerticalContent +
+      2 * NativeAdStyle._boundedDimension(contentPadding).round();
+
+  void validateSize({
+    required int width,
+    required int height,
+    double contentPadding = _defaultContentPadding,
+  }) {
+    final requiredWidth = minimumWidthFor(contentPadding);
+    final requiredHeight = minimumHeightFor(contentPadding);
+    if (width < requiredWidth) {
       throw ArgumentError.value(
-          width, 'width', 'Must be at least $minimumWidth.');
+          width, 'width', 'Must be at least $requiredWidth.');
     }
-    if (height < minimumHeight) {
+    if (height < requiredHeight) {
       throw ArgumentError.value(
         height,
         'height',
-        'Must be at least $minimumHeight.',
+        'Must be at least $requiredHeight.',
       );
     }
   }

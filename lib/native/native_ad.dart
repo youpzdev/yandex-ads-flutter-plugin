@@ -35,7 +35,9 @@ class NativeAd with _Ad {
   bool _loadStarted = false;
   bool _loadFinished = false;
   bool _nativeLoadInvoked = false;
+  bool _loadSucceeded = false;
   bool _cancelWhenPlatformViewReady = false;
+  Map<String, dynamic>? _nativeLoadArguments;
   Future<void>? _nativeDestroyFuture;
 
   NativeAd({
@@ -51,7 +53,11 @@ class NativeAd with _Ad {
     if (loadTimeout <= Duration.zero) {
       throw ArgumentError.value(loadTimeout, 'loadTimeout');
     }
-    template.validateSize(width: width, height: height);
+    template.validateSize(
+      width: width,
+      height: height,
+      contentPadding: style.contentPadding,
+    );
     unawaited(_loadedCompleter.future.catchError((Object _) {}));
     _widget = _PlatformInterface.instance.buildNativeAd(
       id: _id,
@@ -61,6 +67,7 @@ class NativeAd with _Ad {
       style: style,
       onPlatformViewCreated: (_) {
         if (isDestroyed) return;
+        final recreated = _platformViewCreated;
         _platformViewCreated = true;
         _listenToEvents();
         if (!_platformViewReady.isCompleted) {
@@ -68,6 +75,10 @@ class NativeAd with _Ad {
         }
         if (_cancelWhenPlatformViewReady) {
           unawaited(_cancelNativeLoad());
+          return;
+        }
+        if (recreated && _nativeLoadInvoked && !_loadFinished) {
+          unawaited(_resendNativeLoad());
         }
       },
     );
@@ -111,12 +122,27 @@ class NativeAd with _Ad {
         'plugin_type': 'flutter',
         'plugin_version': YandexAds.pluginVersion,
       }..addAll(adRequest.parameters ?? {});
+      _nativeLoadArguments = map;
       _nativeLoadInvoked = true;
       await _channel.invokeMethod<void>('load', map);
       await _loadedCompleter.future;
     } catch (error, stackTrace) {
       _completeLoadError(error, stackTrace);
       rethrow;
+    }
+  }
+
+  /// Repeats the request when the platform view is recreated mid-load.
+  ///
+  /// A recreated view is a fresh native instance: the interrupted request
+  /// belonged to the previous one and would never report back.
+  Future<void> _resendNativeLoad() async {
+    final arguments = _nativeLoadArguments;
+    if (arguments == null || isDestroyed || _loadFinished) return;
+    try {
+      await _channel.invokeMethod<void>('load', arguments);
+    } catch (error, stackTrace) {
+      _completeLoadError(error, stackTrace);
     }
   }
 
@@ -132,14 +158,16 @@ class NativeAd with _Ad {
         final map = Map<dynamic, dynamic>.from(event as Map);
         switch (map['name']) {
           case 'onAdLoaded':
-            if (_loadFinished) return;
+            if (_loadFinished && !_loadSucceeded) return;
             _loadTimer?.cancel();
-            _loadStateController.add(
-              NativeAdLoadStateLoaded(
-                width: (map['width'] as num?)?.toInt() ?? width,
-                height: (map['height'] as num?)?.toInt() ?? height,
-              ),
-            );
+            if (!_loadStateController.isClosed) {
+              _loadStateController.add(
+                NativeAdLoadStateLoaded(
+                  width: (map['width'] as num?)?.toInt() ?? width,
+                  height: (map['height'] as num?)?.toInt() ?? height,
+                ),
+              );
+            }
             _completeLoadSuccess();
             break;
           case 'onAdFailedToLoad':
@@ -175,6 +203,7 @@ class NativeAd with _Ad {
   void _completeLoadSuccess() {
     if (_loadFinished) return;
     _loadFinished = true;
+    _loadSucceeded = true;
     _loadTimer?.cancel();
     if (!_loadedCompleter.isCompleted) {
       _loadedCompleter.complete();
@@ -241,7 +270,11 @@ class NativeAd with _Ad {
     }
     try {
       if (_platformViewCreated) {
-        await super.destroy();
+        try {
+          await super.destroy();
+        } on MissingPluginException {
+          // The platform view was already disposed and released its channel.
+        }
       } else {
         _destroyed = true;
         _finalizer.detach(this);

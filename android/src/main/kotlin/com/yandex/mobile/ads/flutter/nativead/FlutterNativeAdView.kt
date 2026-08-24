@@ -18,6 +18,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.view.View.MeasureSpec
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -51,8 +52,11 @@ internal class FlutterNativeAdView(
     private lateinit var contentView: LinearLayout
     private var eventListener: NativeAdFlutterEventListener? = null
     private var onDisposed: (() -> Unit)? = null
+    private var onAdReady: ((NativeAd?) -> Unit)? = null
     private var nativeAd: NativeAd? = null
     private var destroyed = false
+    private var loadPending = false
+    private var pendingAdUnitId = ""
     private var loadGeneration = 0L
     private var minimumContainerWidthDp = 0
     private var minimumContainerHeightDp = 0
@@ -71,6 +75,19 @@ internal class FlutterNativeAdView(
         onDisposed = callback
     }
 
+    fun setOnAdReady(callback: (NativeAd?) -> Unit) {
+        onAdReady = callback
+    }
+
+    fun bindCachedAd(cachedAd: NativeAd) {
+        runOnMain {
+            if (destroyed) return@runOnMain
+            val generation = ++loadGeneration
+            pendingAdUnitId = ""
+            applyLoadedAd(cachedAd, "", generation, cached = true)
+        }
+    }
+
     fun load(arguments: Any?, result: MethodChannel.Result) {
         val args = arguments as? Map<String, Any?>
             ?: return result.error("Args", "Args must be Map<String, Object?>", null)
@@ -82,14 +99,16 @@ internal class FlutterNativeAdView(
             }
             val generation = ++loadGeneration
             val adUnitId = args[AD_UNIT_ID] as? String ?: ""
-            nativeAd?.setNativeAdEventListener(null)
-            nativeAd = null
+            releaseLoadedAd()
             hideNativeAd()
             if (!canRender()) {
+                loadPending = false
                 sendLayoutFailure(adUnitId)
                 result.success(null)
                 return@runOnMain
             }
+            loadPending = true
+            pendingAdUnitId = adUnitId
             try {
                 adLoader.cancelLoading()
                 adLoader.loadAd(args.toAdRequest(adUnitId), object : NativeAdLoadListener {
@@ -100,41 +119,14 @@ internal class FlutterNativeAdView(
                                 return@runOnMain
                             }
                             if (generation != loadGeneration) return@runOnMain
-                            nativeAd?.setNativeAdEventListener(null)
-                            try {
-                                val bindingResult = loadedAd.bindNativeAd(binder)
-                                if (bindingResult is AdBindingResult.Failure) {
-                                    sendBindingFailure(adUnitId, bindingResult.exception)
-                                    return@runOnMain
-                                }
-                            } catch (error: NativeAdException) {
-                                sendBindingFailure(adUnitId, error)
-                                return@runOnMain
-                            } catch (error: RuntimeException) {
-                                sendBindingFailure(adUnitId, error)
-                                return@runOnMain
-                            }
-                            nativeAdView.post {
-                                if (destroyed) {
-                                    hideNativeAd()
-                                    return@post
-                                }
-                                if (generation != loadGeneration) return@post
-                                if (!canFitBoundContent()) {
-                                    sendLayoutFailure(adUnitId)
-                                    return@post
-                                }
-                                nativeAd = loadedAd
-                                eventListener?.let(loadedAd::setNativeAdEventListener)
-                                nativeAdView.visibility = View.VISIBLE
-                                eventListener?.onAdLoaded()
-                            }
+                            applyLoadedAd(loadedAd, adUnitId, generation, cached = false)
                         }
                     }
 
                     override fun onAdFailedToLoad(error: com.yandex.mobile.ads.common.AdRequestError) {
                         runOnMain {
                             if (!destroyed && generation == loadGeneration) {
+                                loadPending = false
                                 hideNativeAd()
                                 eventListener?.onAdFailedToLoad(error)
                             }
@@ -143,36 +135,25 @@ internal class FlutterNativeAdView(
                 })
                 result.success(null)
             } catch (error: RuntimeException) {
-                if (!destroyed && generation == loadGeneration) {
-                    result.error("NativeAd", error.message ?: "Unable to load native ad", null)
+                if (generation == loadGeneration) {
+                    loadPending = false
                 }
+                result.error("NativeAd", error.message ?: "Unable to load native ad", null)
             }
         }
     }
 
     fun destroy(onDestroyed: () -> Unit) {
-        runOnMain {
-            if (!destroyed) {
-                destroyed = true
-                loadGeneration++
-                adLoader.cancelLoading()
-                nativeAd?.setNativeAdEventListener(null)
-                nativeAd = null
-                eventListener?.clear()
-                eventListener = null
-                hideNativeAd()
-            }
-            onDestroyed()
-        }
+        teardown(releaseAd = true, onDone = onDestroyed)
     }
 
     fun cancelLoading(result: MethodChannel.Result) {
         runOnMain {
             if (!destroyed) {
                 loadGeneration++
+                loadPending = false
                 adLoader.cancelLoading()
-                nativeAd?.setNativeAdEventListener(null)
-                nativeAd = null
+                releaseLoadedAd()
                 hideNativeAd()
             }
             result.success(null)
@@ -180,9 +161,89 @@ internal class FlutterNativeAdView(
     }
 
     override fun dispose() {
-        destroy {
+        teardown(releaseAd = false) {
             onDisposed?.invoke()
             onDisposed = null
+        }
+    }
+
+    private fun teardown(releaseAd: Boolean, onDone: () -> Unit) {
+        runOnMain {
+            if (!destroyed) {
+                destroyed = true
+                loadGeneration++
+                adLoader.cancelLoading()
+                if (loadPending) {
+                    loadPending = false
+                    eventListener?.onAdFailedToLoad(
+                        DESTROYED_CODE,
+                        "Native ad view was destroyed while loading",
+                        pendingAdUnitId,
+                    )
+                }
+                if (releaseAd) {
+                    releaseLoadedAd()
+                } else {
+                    nativeAd?.setNativeAdEventListener(null)
+                    nativeAd = null
+                }
+                eventListener?.clear()
+                eventListener = null
+                onAdReady = null
+                hideNativeAd()
+            }
+            onDone()
+        }
+    }
+
+    private fun releaseLoadedAd() {
+        nativeAd?.setNativeAdEventListener(null)
+        nativeAd = null
+        onAdReady?.invoke(null)
+    }
+
+    private fun applyLoadedAd(
+        loadedAd: NativeAd,
+        adUnitId: String,
+        generation: Long,
+        cached: Boolean,
+    ) {
+        nativeAd?.setNativeAdEventListener(null)
+        try {
+            val bindingResult = loadedAd.bindNativeAd(binder)
+            if (bindingResult is AdBindingResult.Failure) {
+                loadPending = false
+                sendBindingFailure(adUnitId, bindingResult.exception)
+                return
+            }
+        } catch (error: NativeAdException) {
+            loadPending = false
+            sendBindingFailure(adUnitId, error)
+            return
+        } catch (error: RuntimeException) {
+            loadPending = false
+            sendBindingFailure(adUnitId, error)
+            return
+        }
+        nativeAdView.post {
+            if (destroyed) {
+                hideNativeAd()
+                return@post
+            }
+            if (generation != loadGeneration) return@post
+            if (!canFitBoundContent()) {
+                loadPending = false
+                sendLayoutFailure(adUnitId)
+                return@post
+            }
+            loadPending = false
+            nativeAd = loadedAd
+            if (!cached) {
+                onAdReady?.invoke(loadedAd)
+            }
+            eventListener?.let(loadedAd::setNativeAdEventListener)
+            nativeAdView.visibility = View.VISIBLE
+            eventListener?.onAdLoaded()
         }
     }
 
@@ -324,11 +385,19 @@ internal class FlutterNativeAdView(
 
     private fun canFitBoundContent(): Boolean {
         if (!canRender()) return false
-        if (nativeAdView.width == 0 || nativeAdView.height == 0) return true
-        return nativeAdView.width >= minimumContainerWidthDp.toPx(density) &&
-            nativeAdView.height >= minimumContainerHeightDp.toPx(density) &&
-            contentView.measuredWidth <= nativeAdView.width &&
-            contentView.measuredHeight <= nativeAdView.height
+        val containerWidth = nativeAdView.width
+        val containerHeight = nativeAdView.height
+        if (containerWidth == 0 || containerHeight == 0) return true
+        if (containerWidth < minimumContainerWidthDp.toPx(density) ||
+            containerHeight < minimumContainerHeightDp.toPx(density)
+        ) {
+            return false
+        }
+        contentView.measure(
+            MeasureSpec.makeMeasureSpec(containerWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(containerHeight, MeasureSpec.AT_MOST),
+        )
+        return contentView.measuredHeight <= containerHeight
     }
 
     private fun sendLayoutFailure(adUnitId: String) {
@@ -395,6 +464,7 @@ internal class FlutterNativeAdView(
         const val STACK_GAP_COUNT = 4
         const val LAYOUT_FAILURE_CODE = -1
         const val BINDING_FAILURE_CODE = -2
+        const val DESTROYED_CODE = -3
         const val TITLE_TEXT_SIZE_SP = 16f
         const val BODY_TEXT_SIZE_SP = 14f
         const val METADATA_TEXT_SIZE_SP = 12f

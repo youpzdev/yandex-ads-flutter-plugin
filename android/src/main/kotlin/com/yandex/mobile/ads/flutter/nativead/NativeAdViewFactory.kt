@@ -13,7 +13,7 @@ package com.yandex.mobile.ads.flutter.nativead
 
 import android.content.Context
 import com.yandex.mobile.ads.flutter.YandexMobileAdsPlugin
-import com.yandex.mobile.ads.flutter.common.EmptyMethodCallHandler
+import com.yandex.mobile.ads.nativeads.NativeAd
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
@@ -25,6 +25,9 @@ internal class NativeAdViewFactory(
     private val messenger: BinaryMessenger,
 ) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
 
+    private val activeViews = HashMap<Int, FlutterNativeAdView>()
+    private val loadedAds = HashMap<Int, NativeAd>()
+
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         val params = args as? Map<*, *>
         val id = (params?.get(ID) as? Number)?.toInt() ?: -1
@@ -34,6 +37,7 @@ internal class NativeAdViewFactory(
         val style = NativeAdStyle.from(params?.get(STYLE) as? Map<*, *>)
         val nativeAdView = FlutterNativeAdView(context, width, height, template, style)
         startFlutterCommunication(id, nativeAdView)
+        loadedAds[id]?.let(nativeAdView::bindCachedAd)
         return nativeAdView
     }
 
@@ -46,18 +50,31 @@ internal class NativeAdViewFactory(
         val disposeChannels = {
             if (!channelsDisposed) {
                 channelsDisposed = true
-                methodChannel.setMethodCallHandler(EmptyMethodCallHandler())
-                eventChannel.setStreamHandler(null)
+                // A replacement platform view may already own the channel names.
+                if (activeViews[id] === nativeAdView) {
+                    activeViews.remove(id)
+                    methodChannel.setMethodCallHandler(null)
+                    eventChannel.setStreamHandler(null)
+                }
             }
         }
 
+        activeViews[id] = nativeAdView
         nativeAdView.setEventListener(eventListener)
         nativeAdView.setOnDisposed(disposeChannels)
+        nativeAdView.setOnAdReady { loadedAd ->
+            if (loadedAd == null) {
+                loadedAds.remove(id)
+            } else {
+                loadedAds[id] = loadedAd
+            }
+        }
         methodChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 LOAD -> nativeAdView.load(call.arguments, result)
                 CANCEL_LOADING -> nativeAdView.cancelLoading(result)
                 DESTROY -> nativeAdView.destroy {
+                    loadedAds.remove(id)
                     disposeChannels()
                     result.success(null)
                 }
