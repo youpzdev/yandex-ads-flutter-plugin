@@ -72,3 +72,4 @@ settings.local.json
 .agents/
 .opencode/
 opencode.json
+.repowise/

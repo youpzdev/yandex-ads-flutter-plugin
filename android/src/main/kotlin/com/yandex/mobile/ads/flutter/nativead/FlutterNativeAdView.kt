@@ -258,6 +258,7 @@ internal class FlutterNativeAdView(
         val mediaHeightDp = template.mediaHeightDp
         minimumContainerWidthDp = MINIMUM_MEDIA_WIDTH_DP + contentPaddingDp.roundToInt() * 2
         minimumContainerHeightDp = mediaHeightDp + MINIMUM_INTERACTIVE_SIZE_DP * 2 +
+            METADATA_LINE_DP * METADATA_LINE_COUNT +
             STACK_SPACING_DP * STACK_GAP_COUNT + contentPaddingDp.roundToInt() * 2
         nativeAdView.apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -461,7 +462,9 @@ internal class FlutterNativeAdView(
         const val MINIMUM_MEDIA_WIDTH_DP = 300
         const val MINIMUM_INTERACTIVE_SIZE_DP = 64
         const val STACK_SPACING_DP = 8
-        const val STACK_GAP_COUNT = 4
+        const val STACK_GAP_COUNT = 5
+        const val METADATA_LINE_DP = 20
+        const val METADATA_LINE_COUNT = 3
         const val LAYOUT_FAILURE_CODE = -1
         const val BINDING_FAILURE_CODE = -2
         const val DESTROYED_CODE = -3
