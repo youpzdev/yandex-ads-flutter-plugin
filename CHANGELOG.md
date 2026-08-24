@@ -17,6 +17,9 @@
 * `ManagedBannerAdController.visibilityThreshold` measures the viewable share
   of a banner and reports `visibleFraction`, `viewableDuration` and
   `requestCount`.
+* `AdShowOutcome.duration` reports how long an ad held the screen, and
+  `AdFrequencyPolicy.durationPenalty` turns that length into a longer gap
+  before the next show.
 * Full-screen shows are serialised: a second show while one is on screen is
   refused instead of stacking two ads.
 * Ads loaded before a `setUserConsent` or `setAgeRestricted` change are dropped

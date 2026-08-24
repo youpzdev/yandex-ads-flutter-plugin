@@ -53,6 +53,29 @@ answer. After the retry budget is used up the pool stops requesting and reports
 `FullscreenAdPoolStatus.exhausted` until `retry()` is called; while the app is
 in the background retries are held instead of firing.
 
+### Choosing how an ad is dismissed
+
+The close button of a full-screen ad is drawn by the Yandex Mobile Ads SDK and
+the creative. `InterstitialAd` exposes exactly three members — `getAdInfo`,
+`setAdEventListener` and `show` — so there is no API in the SDK, and no setting
+in the ad unit, that moves the close button, shortens its countdown or removes
+the forced view. A plugin cannot add one.
+
+What is a real choice is the format. An app open ad is dismissed immediately
+through its own return control, while an interstitial may hold the screen for
+the length of the creative. If a placement needs an instant exit, use
+`FullscreenAdPool.appOpen` for it; the example screen "Preloaded full-screen"
+switches between both so the difference can be seen on a device.
+
+Keep in mind what the format is sold as: an app open ad is meant for opening or
+returning to the app. Using it as a mid-session interstitial is a decision for
+the publisher to make with its ad network, not something this plugin decides.
+
+Whatever the format, `AdShowOutcome.duration` reports how long the ad held the
+screen, and `AdFrequencyPolicy.durationPenalty` turns that length into a longer
+gap before the next one: with the default factor of 2, a 75 second ad pushes
+the next show 150 seconds further away.
+
 ### Pacing
 
 `AdFrequencyPolicy` limits how often a full-screen ad may appear: a minimum

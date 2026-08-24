@@ -14,6 +14,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:yandex_mobileads/mobile_ads.dart';
 
+enum _Format {
+  interstitial('Interstitial', 'demo-interstitial-yandex'),
+  appOpen('App open', 'demo-appopenad-yandex');
+
+  const _Format(this.title, this.adUnitId);
+
+  final String title;
+  final String adUnitId;
+}
+
 class PreloadedAdsPage extends StatefulWidget {
   const PreloadedAdsPage({super.key});
 
@@ -22,36 +32,28 @@ class PreloadedAdsPage extends StatefulWidget {
 }
 
 class _PreloadedAdsPageState extends State<PreloadedAdsPage> {
-  late final AdFrequencyGate _gate;
-  late final FullscreenAdPool<InterstitialAd> _pool;
+  static const _policy = AdFrequencyPolicy(
+    startupGrace: Duration(seconds: 5),
+    minimumInterval: Duration(seconds: 45),
+    maximumPerHour: 6,
+    maximumPerDay: 20,
+  );
+
+  _Format _format = _Format.interstitial;
+  late AdFrequencyGate _gate;
+  late FullscreenAdPool<Object> _pool;
 
   StreamSubscription<FullscreenAdPoolState>? _poolStates;
   StreamSubscription<AdEvent>? _events;
 
   FullscreenAdPoolState? _state;
+  Duration? _lastDuration;
   final _log = <String>[];
-  String _status = 'Preloading an interstitial ad.';
+  String _status = 'Preloading an ad.';
 
   @override
   void initState() {
     super.initState();
-    _gate = AdFrequencyGate(
-      policy: const AdFrequencyPolicy(
-        startupGrace: Duration(seconds: 5),
-        minimumInterval: Duration(seconds: 45),
-        maximumPerHour: 6,
-        maximumPerDay: 20,
-      ),
-    );
-    _pool = FullscreenAdPool.interstitial(
-      adRequest: const AdRequest(adUnitId: 'demo-interstitial-yandex'),
-      capacity: 2,
-      frequencyGate: _gate,
-      retryPolicy: AdRetryPolicy.standard,
-    );
-    _poolStates = _pool.states.listen((state) {
-      if (mounted) setState(() => _state = state);
-    });
     _events = YandexAds.events.listen((event) {
       if (!mounted) return;
       setState(() {
@@ -59,7 +61,7 @@ class _PreloadedAdsPageState extends State<PreloadedAdsPage> {
         if (_log.length > 12) _log.removeLast();
       });
     });
-    unawaited(_pool.start());
+    _startPool();
   }
 
   @override
@@ -70,10 +72,46 @@ class _PreloadedAdsPageState extends State<PreloadedAdsPage> {
     super.dispose();
   }
 
+  void _startPool() {
+    _gate = AdFrequencyGate(policy: _policy);
+    _pool = _format == _Format.interstitial
+        ? FullscreenAdPool.interstitial(
+            adRequest: AdRequest(adUnitId: _format.adUnitId),
+            capacity: 2,
+            frequencyGate: _gate,
+          )
+        : FullscreenAdPool.appOpen(
+            adRequest: AdRequest(adUnitId: _format.adUnitId),
+            capacity: 2,
+            frequencyGate: _gate,
+          );
+    _poolStates = _pool.states.listen((state) {
+      if (mounted) setState(() => _state = state);
+    });
+    unawaited(_pool.start());
+  }
+
+  Future<void> _changeFormat(_Format format) async {
+    if (format == _format) return;
+    final previous = _pool;
+    await _poolStates?.cancel();
+    setState(() {
+      _format = format;
+      _state = null;
+      _lastDuration = null;
+      _status = 'Preloading a ${format.title.toLowerCase()} ad.';
+    });
+    _startPool();
+    await previous.destroy();
+  }
+
   Future<void> _show() async {
     final outcome = await _pool.showNext(waitFor: const Duration(seconds: 3));
     if (!mounted) return;
-    setState(() => _status = _describe(outcome));
+    setState(() {
+      _lastDuration = outcome.duration;
+      _status = _describe(outcome);
+    });
   }
 
   String _describe(AdShowOutcome outcome) {
@@ -100,11 +138,28 @@ class _PreloadedAdsPageState extends State<PreloadedAdsPage> {
   Widget build(BuildContext context) {
     final state = _state;
     final decision = _gate.evaluate();
+    final duration = _lastDuration;
     return Scaffold(
-      appBar: AppBar(title: const Text('Preloaded interstitial')),
+      appBar: AppBar(title: const Text('Preloaded full-screen')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          SegmentedButton<_Format>(
+            segments: [
+              for (final format in _Format.values)
+                ButtonSegment(value: format, label: Text(format.title)),
+            ],
+            selected: {_format},
+            onSelectionChanged: (selection) => _changeFormat(selection.first),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'The close button belongs to the ad SDK and the creative. '
+            'Compare both formats here to pick the dismissal a placement '
+            'needs.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
           Text(_status, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 16),
           Card(
@@ -127,6 +182,12 @@ class _PreloadedAdsPageState extends State<PreloadedAdsPage> {
                                 '${decision.retryAfter!.inSeconds} s'}',
                   ),
                   Text('Shown this session: ${_gate.sessionShowCount}'),
+                  if (duration != null)
+                    Text('Last ad held the screen: '
+                        '${(duration.inMilliseconds / 1000).toStringAsFixed(1)}'
+                        ' s'),
+                  Text('Next gap after it: '
+                      '${_gate.effectiveMinimumInterval.inSeconds} s'),
                 ],
               ),
             ),
@@ -134,7 +195,7 @@ class _PreloadedAdsPageState extends State<PreloadedAdsPage> {
           const SizedBox(height: 16),
           FilledButton(
             onPressed: _show,
-            child: const Text('Show interstitial'),
+            child: Text('Show ${_format.title.toLowerCase()}'),
           ),
           const SizedBox(height: 24),
           Text('Ad events', style: Theme.of(context).textTheme.titleSmall),
