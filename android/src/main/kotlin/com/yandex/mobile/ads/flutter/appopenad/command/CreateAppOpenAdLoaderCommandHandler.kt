@@ -32,7 +32,8 @@ internal class CreateAppOpenAdLoaderCommandHandler(
             ?: return result.error(CommandError.MissingArgsCast)
         val id = argsMap[CommandArgKeys.ID] as? Int
             ?: return result.error(CommandError.MissingArgsCast)
-        val context = activityContextHolder.activityContext?.applicationContext ?: return
+        val context = activityContextHolder.activityContext?.applicationContext
+            ?: return result.error(CommandError.ActivityContextIsNull)
         val loader = AppOpenAdLoader(context)
 
         adLoaderCreator.createAdLoader(result, id, APP_OPEN_AD_LOADER) { onDestroy ->

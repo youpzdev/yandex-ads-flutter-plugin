@@ -17,6 +17,8 @@
 * `ManagedBannerAdController.visibilityThreshold` measures the viewable share
   of a banner and reports `visibleFraction`, `viewableDuration` and
   `requestCount`.
+* An ad that cannot be shown because the screen is busy goes back to its pool
+  with its age and consent stamp intact, instead of being destroyed.
 * `AdShowOutcome.duration` reports how long an ad held the screen, and
   `AdFrequencyPolicy.durationPenalty` turns that length into a longer gap
   before the next show.
@@ -43,7 +45,16 @@
   resolving the native SDK and Gradle plugins — in the plugin, in the example
   app and in the test project.
 * Neither platform builds an ad and its channels when the Dart side has already
-  stopped listening.
+  stopped listening, and the ad it drops no longer keeps an event listener.
+* Creating a full-screen ad loader without an attached Activity answers with an
+  error instead of leaving the Dart future pending for ever.
+* A disposed banner platform view releases its channels and its holder, so a
+  later load reports an error instead of staying silent.
+* Commands sent to a destroyed native object answer with an error; only
+  `destroy` stays successful.
+* The plugin releases its channels when it leaves the Flutter engine.
+* `AdInfo.creatives` carries `offerId` on Android, and request parameters and
+  context tags are filtered by type instead of being cast blindly.
 
 ### Behavior changes against upstream 8.3.0
 

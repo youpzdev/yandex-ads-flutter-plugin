@@ -492,6 +492,10 @@ void main() {
     final outcomeB = await showB;
     expect(outcomeB.status, AdShowStatus.alreadyShowing,
         reason: 'the second pool must not stack another ad on the screen');
+    expect(poolB.availableCount, 1,
+        reason: 'an ad that could not be shown goes back to its pool');
+    expect(first.destroyedAds, isEmpty,
+        reason: 'nothing was shown, so nothing should be released');
 
     await first.waitForShow();
     first.emitAdEvent({'name': 'onAdShown'});

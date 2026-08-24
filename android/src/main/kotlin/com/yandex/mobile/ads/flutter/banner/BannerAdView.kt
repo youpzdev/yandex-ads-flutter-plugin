@@ -24,10 +24,26 @@ internal class BannerAdView(
         setAdSize(adSize)
     }
 
+    private var onDisposed: (() -> Unit)? = null
+    private var destroyed = false
+
+    val isDestroyed: Boolean
+        get() = destroyed
+
+    fun setOnDisposed(callback: () -> Unit) {
+        onDisposed = callback
+    }
+
     override fun getView() = banner
 
     override fun dispose() {
-        banner.destroy()
+        if (!destroyed) {
+            destroyed = true
+            banner.setBannerAdEventListener(null)
+            banner.destroy()
+        }
+        onDisposed?.invoke()
+        onDisposed = null
     }
 
     companion object {

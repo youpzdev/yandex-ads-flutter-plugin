@@ -16,14 +16,21 @@ internal fun Map<String, Any?>.toAdRequest(
     adUnitId: String
 ) = AdRequest.Builder(adUnitId).also { builder ->
     toAdTargeting().let(builder::setTargeting)
-    (getValueOrNull<Map<String, String>>(PARAMETERS))?.let(builder::setParameters)
+    (getValueOrNull<Map<*, *>>(PARAMETERS))
+        ?.mapNotNull { (key, value) ->
+            if (key is String && value is String) key to value else null
+        }
+        ?.toMap()
+        ?.let(builder::setParameters)
     (getValueOrNull<String>(PREFERRED_THEME))?.toAdTheme()?.let(builder::setPreferredTheme)
 }.build()
 
 private fun Map<String, Any?>.toAdTargeting(): AdTargeting = AdTargeting.Builder().also { builder ->
     (getValueOrNull<String>(AGE))?.let(builder::setAge)
     (getValueOrNull<String>(CONTEXT_QUERY))?.let(builder::setContextQuery)
-    (getValueOrNull<List<String>>(CONTEXT_TAGS))?.let(builder::setContextTags)
+    (getValueOrNull<List<*>>(CONTEXT_TAGS))
+        ?.filterIsInstance<String>()
+        ?.let(builder::setContextTags)
     (getValueOrNull<String>(GENDER))?.let(builder::setGender)
     (getValueOrNull<Map<String, Double>>(LOCATION))?.toLocation()?.let(builder::setLocation)
 }.build()

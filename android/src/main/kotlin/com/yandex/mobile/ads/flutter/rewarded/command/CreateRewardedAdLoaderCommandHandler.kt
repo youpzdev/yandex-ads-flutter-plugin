@@ -32,7 +32,8 @@ internal class CreateRewardedAdLoaderCommandHandler(
             ?: return result.error(CommandError.MissingArgsCast)
         val id = argsMap[CommandArgKeys.ID] as? Int
             ?: return result.error(CommandError.MissingArgsCast)
-        val context = activityContextHolder.activityContext?.applicationContext ?: return
+        val context = activityContextHolder.activityContext?.applicationContext
+            ?: return result.error(CommandError.ActivityContextIsNull)
         val loader = RewardedAdLoader(context)
 
         adLoaderCreator.createAdLoader(result, id, REWARDED_AD_LOADER) { onDestroy ->

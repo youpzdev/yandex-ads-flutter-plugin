@@ -16,6 +16,7 @@ internal fun AdInfo.toMap(): Map<String, Any?> {
     val creativesData = creatives.map { creative ->
         mapOf(
             PLACE_ID to creative.placeId,
+            OFFER_ID to creative.offerId,
             CAMPAIGN_ID to creative.campaignId,
             CREATIVE_ID to creative.creativeId,
         ).filterValues { value -> value != null }
@@ -36,5 +37,6 @@ private const val PARTNER_TEXT = "partnerText"
 private const val AD_UNIT_ID = "adUnitId"
 private const val CREATIVES = "creatives"
 private const val PLACE_ID = "placeId"
+private const val OFFER_ID = "offerId"
 private const val CAMPAIGN_ID = "campaignId"
 private const val CREATIVE_ID = "creativeId"

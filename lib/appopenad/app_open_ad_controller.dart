@@ -94,7 +94,10 @@ class AppOpenAdController with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     await _pool.start();
     if (showOnColdStart) {
-      unawaited(showIfAllowed(waitFor: waitForAd, ignoreStartupGrace: true));
+      unawaited(
+        showIfAllowed(waitFor: waitForAd, ignoreStartupGrace: true)
+            .catchError((Object _) => const AdShowOutcome._(AdShowStatus.failed)),
+      );
     }
   }
 
@@ -105,13 +108,14 @@ class AppOpenAdController with WidgetsBindingObserver {
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
-        _backgroundedAt = _clock();
-        _suppressNextResume = _AdActivity.isShowing ||
+        _backgroundedAt ??= _clock();
+        _suppressNextResume = _suppressNextResume ||
+            _AdActivity.isShowing ||
             _showing ||
             _AdActivity.clickCount != _clicksAtResume;
         break;
       case AppLifecycleState.resumed:
-        unawaited(_handleResume());
+        unawaited(_handleResume().catchError((Object _) {}));
         break;
       case AppLifecycleState.inactive:
         break;
@@ -157,6 +161,13 @@ class AppOpenAdController with WidgetsBindingObserver {
       final outcome = await _pool.showNext(
         waitFor: waitFor ?? waitForAd,
         ignoreStartupGrace: ignoreStartupGrace,
+      );
+      _publish(outcome);
+      return outcome;
+    } catch (error) {
+      final outcome = AdShowOutcome._(
+        AdShowStatus.failed,
+        error: AdError(error.toString()),
       );
       _publish(outcome);
       return outcome;

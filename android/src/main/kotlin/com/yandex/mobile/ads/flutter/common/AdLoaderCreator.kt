@@ -30,7 +30,7 @@ internal class AdLoaderCreator(
         val eventChannel = EventChannel(messenger, "$name.events")
 
         val provider = commandHandlerProviderFactory {
-            methodChannel.setMethodCallHandler(EmptyMethodCallHandler())
+            methodChannel.setMethodCallHandler(EmptyMethodCallHandler(CommandError.CommandNotImplemented))
             eventChannel.setStreamHandler(null)
         }
         methodChannel.setMethodCallHandler { call, result ->

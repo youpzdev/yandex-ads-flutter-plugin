@@ -32,7 +32,8 @@ internal class CreateInterstitialAdLoaderCommandHandler(
             ?: return result.error(CommandError.MissingArgsCast)
         val id = argsMap[CommandArgKeys.ID] as? Int
             ?: return result.error(CommandError.MissingArgsCast)
-        val context = activityContextHolder.activityContext?.applicationContext ?: return
+        val context = activityContextHolder.activityContext?.applicationContext
+            ?: return result.error(CommandError.ActivityContextIsNull)
         val loader = InterstitialAdLoader(context)
 
         adLoaderCreator.createAdLoader(result, id, INTERSTITIAL_AD_LOADER) { onDestroy ->

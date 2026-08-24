@@ -99,7 +99,7 @@ placement wants to own the ad itself; then it must destroy it.
 Other behaviour worth knowing:
 
 * only one full-screen ad at a time, across every pool and every direct
-  `show()` in the process; an ad can also be shown only once;
+  `show()` of the same Flutter engine; an ad can also be shown only once;
 * stale ads are replaced (`timeToLive`), failed requests are repeated with a
   growing delay and jitter (`AdRetryPolicy`), and retries pause while the app
   is in the background;

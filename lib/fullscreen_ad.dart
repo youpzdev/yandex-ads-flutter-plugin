@@ -24,6 +24,9 @@ abstract class _FullscreenAd with _Ad {
   bool _holdsScreen = false;
   Timer? _screenGuard;
 
+  /// Upper bound for holding the screen claim without a dismissal.
+  static const screenGuard = Duration(minutes: 10);
+
   _FullscreenAd({required this.channelName, required this.id, this.adInfo});
 
   /// Whether this ad may still be shown.
@@ -36,6 +39,9 @@ abstract class _FullscreenAd with _Ad {
   Future<void> _setAdEventListener({
     required _FullScreenAdEventListener eventListener,
   }) async {
+    if (_holdsScreen) {
+      throw StateError('Cannot replace the event listener of a shown ad.');
+    }
     await _eventListener?.dispose();
     _eventListener = eventListener;
     _eventListener?.setupCallbacks();
@@ -61,17 +67,25 @@ abstract class _FullscreenAd with _Ad {
     }
     _shown = true;
     _holdsScreen = true;
-    _screenGuard = Timer(const Duration(minutes: 5), _releaseScreen);
+    _screenGuard = Timer(screenGuard, _releaseScreen);
     try {
       await _channel.invokeMethod<void>('show');
     } catch (_) {
       _releaseScreen();
       rethrow;
     }
+    final listener = _eventListener;
+    if (listener == null) {
+      _releaseScreen();
+      return;
+    }
     unawaited(
-      _eventListener
-          ?.waitForTerminal()
-          .then((_) => _releaseScreen(), onError: (Object _) => _releaseScreen()),
+      listener.waitForTerminal().then(
+        (_) => _releaseScreen(),
+        onError: (Object _) {
+          if (identical(_eventListener, listener)) _releaseScreen();
+        },
+      ),
     );
   }
 

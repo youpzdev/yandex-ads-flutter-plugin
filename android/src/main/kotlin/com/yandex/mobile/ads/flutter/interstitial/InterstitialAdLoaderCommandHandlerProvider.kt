@@ -55,7 +55,10 @@ internal class InterstitialAdLoaderCommandHandlerProvider(
             override fun onAdLoaded(interstitialAd: InterstitialAd) {
                 val listener = InterstitialAdEventListener()
                 interstitialAd.setAdEventListener(listener)
-                if (!hasListener) return
+                if (!hasListener) {
+                    interstitialAd.setAdEventListener(null)
+                    return
+                }
                 val id = adCreator.createFullScreenAd(
                     INTERSTITIAL_AD,
                     listener

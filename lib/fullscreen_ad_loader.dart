@@ -259,7 +259,7 @@ abstract class _FullscreenAdLoader {
       return;
     }
     try {
-      await initialization;
+      await initialization.timeout(const Duration(seconds: 5));
     } catch (_) {
       return;
     }

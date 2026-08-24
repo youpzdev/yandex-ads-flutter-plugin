@@ -16,6 +16,7 @@ import com.yandex.mobile.ads.flutter.YandexMobileAdsPlugin
 import com.yandex.mobile.ads.flutter.banner.BannerAdUtil.toDp
 import com.yandex.mobile.ads.flutter.banner.command.DestroyBannerCommandHandler
 import com.yandex.mobile.ads.flutter.banner.command.LoadBannerCommandHandler
+import com.yandex.mobile.ads.flutter.common.CommandError
 import com.yandex.mobile.ads.flutter.common.EmptyMethodCallHandler
 import com.yandex.mobile.ads.flutter.common.ObjectHolder
 import io.flutter.plugin.common.BinaryMessenger
@@ -27,6 +28,8 @@ import io.flutter.plugin.platform.PlatformViewFactory
 
 internal class BannerAdViewFactory(private val messenger: BinaryMessenger) :
     PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+
+    private val activeViews = HashMap<Int, BannerAdView>()
 
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         val params = args as? Map<*, *>
@@ -85,13 +88,27 @@ internal class BannerAdViewFactory(private val messenger: BinaryMessenger) :
         val eventChannel = EventChannel(messenger, "$name.events")
 
         val bannerAdHolder = ObjectHolder(bannerAdView)
+        var released = false
+        val release = {
+            if (!released) {
+                released = true
+                bannerAdHolder.value = null
+                if (activeViews[id] === bannerAdView) {
+                    activeViews.remove(id)
+                    methodChannel.setMethodCallHandler(
+                        EmptyMethodCallHandler(CommandError.BannerAdIsNull)
+                    )
+                    eventChannel.setStreamHandler(null)
+                }
+            }
+        }
+
+        activeViews[id] = bannerAdView
+        bannerAdView.setOnDisposed(release)
         val provider = BannerAdCommandHandlerProvider(
             mapOf(
                 LOAD to LoadBannerCommandHandler(bannerAdHolder),
-                DESTROY to DestroyBannerCommandHandler(bannerAdHolder) {
-                    methodChannel.setMethodCallHandler(EmptyMethodCallHandler())
-                    eventChannel.setStreamHandler(null)
-                }
+                DESTROY to DestroyBannerCommandHandler(bannerAdHolder, release)
             )
         )
         methodChannel.setMethodCallHandler { call, result ->

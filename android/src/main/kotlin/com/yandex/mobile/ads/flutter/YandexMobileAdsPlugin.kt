@@ -34,6 +34,7 @@ import io.flutter.plugin.common.MethodChannel
 class YandexMobileAdsPlugin : FlutterPlugin, ActivityAware {
 
     private val activityContextHolder = ActivityContextHolder()
+    private val channels = mutableListOf<MethodChannel>()
 
     override fun onAttachedToEngine(binding: FlutterPluginBinding) {
         val factory = BannerAdViewFactory(binding.binaryMessenger)
@@ -51,15 +52,16 @@ class YandexMobileAdsPlugin : FlutterPlugin, ActivityAware {
         )
 
         providers.forEach { provider ->
-            MethodChannel(binding.binaryMessenger, "$ROOT.${provider.name}")
-                .setMethodCallHandler { call, result ->
-                    provider.commandHandlers[call.method]?.handleCommand(
-                        call.method,
-                        call.arguments,
-                        result
-                    )
-                        ?: result.notImplemented()
-                }
+            val channel = MethodChannel(binding.binaryMessenger, "$ROOT.${provider.name}")
+            channel.setMethodCallHandler { call, result ->
+                provider.commandHandlers[call.method]?.handleCommand(
+                    call.method,
+                    call.arguments,
+                    result
+                )
+                    ?: result.notImplemented()
+            }
+            channels.add(channel)
         }
     }
 
@@ -129,7 +131,11 @@ class YandexMobileAdsPlugin : FlutterPlugin, ActivityAware {
         activityContextHolder.onDetachedFromActivity()
     }
 
-    override fun onDetachedFromEngine(binding: FlutterPluginBinding) = Unit
+    override fun onDetachedFromEngine(binding: FlutterPluginBinding) {
+        channels.forEach { it.setMethodCallHandler(null) }
+        channels.clear()
+        activityContextHolder.onDetachedFromActivity()
+    }
 
     internal companion object {
 

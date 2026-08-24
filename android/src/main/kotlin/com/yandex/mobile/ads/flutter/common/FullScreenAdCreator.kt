@@ -19,6 +19,8 @@ internal class FullScreenAdCreator(
     private val messenger: BinaryMessenger
 ) {
 
+    private var idCount = 0
+
     fun createFullScreenAd(
         channelName: String,
         listener: FullScreenEventListener,
@@ -29,7 +31,7 @@ internal class FullScreenAdCreator(
         val methodChannel = MethodChannel(messenger, name)
         val eventChannel = EventChannel(messenger, "$name.events")
         val provider = onDestroyHandlerProvider {
-            methodChannel.setMethodCallHandler(EmptyMethodCallHandler())
+            methodChannel.setMethodCallHandler(EmptyMethodCallHandler(CommandError.CommandNotImplemented))
             eventChannel.setStreamHandler(null)
         }
         methodChannel.setMethodCallHandler { call, result ->
@@ -40,8 +42,5 @@ internal class FullScreenAdCreator(
         return id
     }
 
-    companion object {
 
-        private var idCount = 0
-    }
 }

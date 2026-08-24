@@ -267,8 +267,14 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     if (loadTimeout <= Duration.zero) {
       throw ArgumentError.value(loadTimeout, 'loadTimeout', 'Must be positive.');
     }
-    if (showTimeout <= Duration.zero) {
-      throw ArgumentError.value(showTimeout, 'showTimeout', 'Must be positive.');
+    if (showTimeout <= Duration.zero ||
+        showTimeout > _FullscreenAd.screenGuard) {
+      throw ArgumentError.value(
+        showTimeout,
+        'showTimeout',
+        'Must be positive and at most ${_FullscreenAd.screenGuard.inMinutes} '
+            'minutes.',
+      );
     }
     retryPolicy.validate();
   }
@@ -440,6 +446,8 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
   /// Starts requesting again after the retry budget was used up.
   Future<void> retry() async {
     _ensureAlive();
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _consecutiveFailures = 0;
     _lastError = null;
     _retryPending = false;
@@ -484,6 +492,11 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
   /// The caller owns the returned ad and must destroy it. Returns `null` when
   /// nothing is ready and [waitFor] elapsed; pass `null` to never wait.
   Future<T?> acquire({Duration? waitFor}) async {
+    final slot = await _acquireSlot(waitFor: waitFor);
+    return slot?.ad as T?;
+  }
+
+  Future<_PoolSlot?> _acquireSlot({Duration? waitFor}) async {
     _ensureAlive();
     if (!_started) await start();
 
@@ -494,8 +507,18 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
       slot = _takeSlot();
     }
     unawaited(_fill());
-    if (slot == null) return null;
-    return slot.ad as T;
+    return slot;
+  }
+
+  /// Puts an ad that was taken but never shown back, keeping its age.
+  void _returnSlot(_PoolSlot slot) {
+    if (_destroyed || _slots.length >= capacity) {
+      unawaited(slot.ad.destroy().catchError((Object _) {}));
+      return;
+    }
+    _slots.insert(0, slot);
+    _releaseWaiters();
+    _publish();
   }
 
   /// Shows the next ad, applying the frequency policy.
@@ -537,6 +560,9 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
         onAdDismissed: onAdDismissed,
         onRewarded: onRewarded,
       );
+    } catch (_) {
+      gate?._undoShow(reservation);
+      rethrow;
     } finally {
       _showInFlight = false;
     }
@@ -552,16 +578,16 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     void Function()? onAdDismissed,
     void Function(Reward reward)? onRewarded,
   }) async {
-    final ad = await acquire(waitFor: waitFor);
-    if (ad == null) {
+    final slot = await _acquireSlot(waitFor: waitFor);
+    if (slot == null) {
       gate?._undoShow(reservation);
       return const AdShowOutcome._(AdShowStatus.unavailable);
     }
 
-    final fullscreen = ad as _FullscreenAd;
+    final fullscreen = slot.ad;
     if (_AdActivity.isShowing) {
       gate?._undoShow(reservation);
-      _slots.insert(0, _PoolSlot(fullscreen, _clock(), _AdConsent.generation));
+      _returnSlot(slot);
       return const AdShowOutcome._(AdShowStatus.alreadyShowing);
     }
 
@@ -603,15 +629,18 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
       failure ??= AdError(error.toString());
     } finally {
       onScreen.stop();
-      gate?.noteShowDuration(onScreen.elapsed);
-      try {
-        await fullscreen.destroy();
-      } catch (_) {}
+      if (!busy) {
+        gate?.noteShowDuration(onScreen.elapsed);
+        try {
+          await fullscreen.destroy();
+        } catch (_) {}
+      }
       unawaited(_fill());
     }
 
     if (busy) {
       gate?._undoShow(reservation);
+      _returnSlot(slot);
       return const AdShowOutcome._(AdShowStatus.alreadyShowing);
     }
 
