@@ -60,12 +60,16 @@ class ManagedBannerAdController extends ChangeNotifier {
   final AdRequest adRequest;
   final ManagedBannerRefreshPolicy refreshPolicy;
 
+  /// How long a single load may stay unanswered before it counts as failed.
+  final Duration loadTimeout;
+
   Duration get refreshInterval => refreshPolicy.refreshInterval;
   Duration get retryInterval => refreshPolicy.retryInterval;
 
   BannerAd? _bannerAd;
   StreamSubscription<BannerAdLoadState>? _loadSubscription;
   Timer? _refreshTimer;
+  Timer? _loadWatchdog;
   DateTime? _visibleSince;
   late Duration _remaining;
   bool _visible = false;
@@ -81,6 +85,7 @@ class ManagedBannerAdController extends ChangeNotifier {
     ManagedBannerRefreshPolicy? refreshPolicy,
     Duration? refreshInterval,
     Duration? retryInterval,
+    this.loadTimeout = const Duration(seconds: 30),
   }) : refreshPolicy = refreshPolicy ??
             ManagedBannerRefreshPolicy(
               refreshInterval: refreshInterval ??
@@ -95,12 +100,17 @@ class ManagedBannerAdController extends ChangeNotifier {
       );
     }
     this.refreshPolicy.validate();
+    if (loadTimeout <= Duration.zero) {
+      throw ArgumentError.value(loadTimeout, 'loadTimeout', 'Must be positive.');
+    }
     _remaining = this.refreshPolicy.refreshInterval;
   }
 
   BannerAd? get bannerAd => _bannerAd;
 
   bool get isLoading => _loading;
+
+  bool get isDestroyed => _destroyed;
 
   Future<void> start() async {
     if (_destroyed) {
@@ -129,11 +139,7 @@ class ManagedBannerAdController extends ChangeNotifier {
   }
 
   Future<void> _resumeVisibleWork() async {
-    if (!_started || _destroyed || !_visible) return;
-    if (_bannerAd == null) {
-      await start();
-      return;
-    }
+    if (!_started || _destroyed || !_visible || _bannerAd == null) return;
     if (_loading) return;
     if (_loadAttempted) {
       _scheduleRefresh();
@@ -148,10 +154,12 @@ class ManagedBannerAdController extends ChangeNotifier {
       _loading = true;
       _refreshTimer?.cancel();
     } else if (state is BannerAdLoadStateLoaded) {
+      _loadWatchdog?.cancel();
       _loading = false;
       _remaining = refreshInterval;
       _restartVisibleClock();
     } else if (state is BannerAdLoadStateError) {
+      _loadWatchdog?.cancel();
       _loading = false;
       _remaining = retryInterval;
       _restartVisibleClock();
@@ -202,20 +210,38 @@ class ManagedBannerAdController extends ChangeNotifier {
     _loadAttempted = true;
     notifyListeners();
     try {
-      await banner.load(adRequest);
+      await banner.load(adRequest, timeout: loadTimeout);
+      _startLoadWatchdog();
     } catch (_) {
       if (_destroyed) return;
-      _loading = false;
-      _remaining = retryInterval;
-      _restartVisibleClock();
-      notifyListeners();
+      _failCurrentLoad();
     }
+  }
+
+  /// Recovers the refresh cycle when the native side accepts a request and
+  /// then never reports back.
+  void _startLoadWatchdog() {
+    _loadWatchdog?.cancel();
+    if (_destroyed || !_loading) return;
+    _loadWatchdog = Timer(loadTimeout, () {
+      if (_destroyed || !_loading) return;
+      _failCurrentLoad();
+    });
+  }
+
+  void _failCurrentLoad() {
+    _loadWatchdog?.cancel();
+    _loading = false;
+    _remaining = retryInterval;
+    _restartVisibleClock();
+    notifyListeners();
   }
 
   Future<void> destroy() async {
     if (_destroyed) return;
     _destroyed = true;
     _refreshTimer?.cancel();
+    _loadWatchdog?.cancel();
     try {
       await _loadSubscription?.cancel();
       await _bannerAd?.destroy();
@@ -256,6 +282,12 @@ class _ManagedBannerAdWidgetState extends State<ManagedBannerAdWidget>
   @override
   void initState() {
     super.initState();
+    if (widget.controller.isDestroyed) {
+      throw StateError(
+        'ManagedBannerAdWidget was given a destroyed controller. '
+        'Create a new controller for a new placement.',
+      );
+    }
     WidgetsBinding.instance.addObserver(this);
     unawaited(widget.controller.start());
   }
@@ -310,19 +342,23 @@ class _ManagedBannerAdWidgetState extends State<ManagedBannerAdWidget>
     final bounds = offset & renderObject.size;
     final viewport = Offset.zero & MediaQuery.of(context).size;
     final scrollViewport = RenderAbstractViewport.maybeOf(renderObject);
+    final scrollPosition = _scrollPosition;
     var inScrollViewport = true;
-    if (scrollViewport != null && _scrollPosition != null) {
+    if (scrollViewport != null && scrollPosition != null) {
+      // getOffsetToReveal(0) is the scroll offset of the placement itself.
       final leading = scrollViewport.getOffsetToReveal(renderObject, 0).offset;
-      final trailing = scrollViewport.getOffsetToReveal(renderObject, 1).offset;
-      final firstVisibleOffset = _scrollPosition!.pixels;
+      final extent = scrollPosition.axis == Axis.vertical
+          ? renderObject.size.height
+          : renderObject.size.width;
+      final firstVisibleOffset = scrollPosition.pixels;
       final lastVisibleOffset =
-          firstVisibleOffset + _scrollPosition!.viewportDimension;
-      final start = leading < trailing ? leading : trailing;
-      final end = leading < trailing ? trailing : leading;
-      inScrollViewport = firstVisibleOffset < end && lastVisibleOffset > start;
+          firstVisibleOffset + scrollPosition.viewportDimension;
+      inScrollViewport = firstVisibleOffset < leading + extent &&
+          lastVisibleOffset > leading;
     }
     final visible = _lifecycleState == AppLifecycleState.resumed &&
-        TickerMode.valuesOf(context).enabled &&
+        // ignore: deprecated_member_use
+        TickerMode.of(context) &&
         bounds.overlaps(viewport) &&
         inScrollViewport &&
         renderObject.size.width > 0 &&

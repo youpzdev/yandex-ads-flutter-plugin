@@ -63,6 +63,7 @@ class BannerAd with _Ad {
     _loadStateSubscription = _loadStateController.stream.listen((state) {
       _loadState = state;
     });
+    unawaited(_platformViewCreated.future.catchError((Object _) {}));
   }
 
   /// Loads an ad with the given [adRequest].
@@ -179,7 +180,16 @@ class BannerAd with _Ad {
       );
     }
     try {
-      await super.destroy();
+      if (_isPlatformViewCreated) {
+        try {
+          await super.destroy();
+        } on MissingPluginException {
+          // The platform view was already disposed and released its channel.
+        }
+      } else {
+        _destroyed = true;
+        _finalizer.detach(this);
+      }
     } finally {
       await _eventListener.dispose();
       await _loadStateSubscription.cancel();
@@ -231,12 +241,14 @@ class _AdWidgetState extends State<AdWidget> {
 
   void _listenToLoadState() {
     _subscription = widget.bannerAd.loadStateStream.listen((state) {
-      if (state is BannerAdLoadStateLoaded && mounted) {
-        setState(() {
+      if (!mounted) return;
+      // Every state can be the first one that has a platform view to show.
+      setState(() {
+        if (state is BannerAdLoadStateLoaded) {
           _width = state.width;
           _height = state.height;
-        });
-      }
+        }
+      });
     });
   }
 

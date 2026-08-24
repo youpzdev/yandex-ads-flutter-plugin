@@ -17,7 +17,7 @@ enum NativeAdTemplate {
 
   static const _defaultContentPadding = 12.0;
   static const _minimumMediaWidth = 300;
-  static const _fixedVerticalContent = 160;
+  static const _fixedVerticalContent = 228;
 
   int get _mediaHeight {
     switch (this) {

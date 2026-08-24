@@ -100,8 +100,8 @@ class _FullScreenAdEventListener {
 
   void _completeTerminal(Map<dynamic, dynamic> result) {
     if (_terminalEvent.isCompleted) return;
+    // The subscription stays alive: impressions can still follow a dismissal.
     _terminalEvent.complete(result);
-    unawaited(_subscription?.cancel());
   }
 
   Future<Map<dynamic, dynamic>> waitForTerminal() => _terminalEvent.future;

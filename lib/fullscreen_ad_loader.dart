@@ -194,15 +194,20 @@ abstract class _FullscreenAdLoader {
       StackTrace.current,
     );
     final initialization = _initialization;
-    if (initialization != null) {
-      try {
-        await initialization;
-      } catch (_) {
-        return;
-      }
+    if (initialization == null) {
+      return;
+    }
+    try {
+      await initialization;
+    } catch (_) {
+      return;
     }
     await _eventSubscription?.cancel();
-    await _channel.invokeMethod<void>('destroy');
+    try {
+      await _channel.invokeMethod<void>('destroy');
+    } on MissingPluginException {
+      // The native loader is already gone.
+    }
   }
 
   void _completePendingWithError(Object error, [StackTrace? stackTrace]) {

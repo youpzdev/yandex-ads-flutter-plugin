@@ -26,6 +26,14 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
     private var nativeAd: (any NativeAd)?
     private var requestSequence = 0
     private var isDestroyed = false
+    private var isLoadPending = false
+    private var pendingAdUnitID = ""
+
+    /// Called with the loaded ad, or with nil when it is released.
+    var onAdReady: (((any NativeAd)?) -> Void)?
+
+    /// Called once the view gave up its method and event channels.
+    var onDisposed: (() -> Void)?
 
     init(
         displaySize: NativeAdDisplaySize,
@@ -44,12 +52,7 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         eventRelay.attach(to: self)
         nativeAdDelegate.owner = self
         eventChannel.setStreamHandler(eventRelay)
-    }
-
-    deinit {
-        eventRelay.detach()
-        methodChannel.setMethodCallHandler(nil)
-        eventChannel.setStreamHandler(nil)
+        nativeAdView.isHidden = true
     }
 
     func view() -> UIView {
@@ -90,43 +93,60 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         eventRelay.send(name: "onImpression", values: ["impressionData": impressionData?.rawData])
     }
 
+    /// Rebinds an ad that outlived its previous platform view.
+    func bindCachedAd(_ ad: any NativeAd) {
+        guard !isDestroyed else { return }
+        requestSequence &+= 1
+        bind(ad: ad, adUnitID: "", cached: true)
+    }
+
     private func load(requestValues: [String: Any?]) {
         requestSequence &+= 1
         let sequence = requestSequence
         let request = requestValues.toAdRequest()
-        nativeAd?.delegate = nil
-        nativeAd = nil
+        releaseLoadedAd()
         nativeAdView.isHidden = true
 
         guard nativeAdView.canRender(in: displaySize) else {
-            sendLayoutFailure(adUnitID: request.adUnitID)
+            isLoadPending = false
+            sendLayoutFailure(adUnitID: request.adUnitID, required: nil)
             return
         }
 
+        isLoadPending = true
+        pendingAdUnitID = request.adUnitID
         let loader = NativeAdLoader()
         adLoader = loader
         loader.loadAd(with: request, options: NativeAdOptions()) { [weak self] loadResult in
             guard let self, !self.isDestroyed, self.requestSequence == sequence else { return }
             switch loadResult {
             case .success(let ad):
-                self.bind(ad: ad, adUnitID: request.adUnitID)
+                self.bind(ad: ad, adUnitID: request.adUnitID, cached: false)
             case .failure(let error):
+                self.isLoadPending = false
                 self.sendLoadFailure(error: error, adUnitID: request.adUnitID)
             }
         }
     }
 
-    private func bind(ad: any NativeAd, adUnitID: String) {
+    private func bind(ad: any NativeAd, adUnitID: String, cached: Bool) {
         ad.delegate = nativeAdDelegate
         do {
             try ad.bind(with: nativeAdView)
-            guard nativeAdView.canFitBoundContent(in: displaySize) else {
+            let required = nativeAdView.boundContentSize(in: displaySize)
+            guard Int(ceil(required.width)) <= displaySize.width,
+                  Int(ceil(required.height)) <= displaySize.height else {
                 ad.delegate = nil
                 nativeAdView.isHidden = true
-                sendLayoutFailure(adUnitID: adUnitID)
+                isLoadPending = false
+                sendLayoutFailure(adUnitID: adUnitID, required: required)
                 return
             }
+            isLoadPending = false
             nativeAd = ad
+            if !cached {
+                onAdReady?(ad)
+            }
             nativeAdView.isHidden = false
             eventRelay.send(
                 name: "onAdLoaded",
@@ -135,8 +155,15 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         } catch {
             ad.delegate = nil
             nativeAdView.isHidden = true
+            isLoadPending = false
             sendLoadFailure(error: error, adUnitID: adUnitID)
         }
+    }
+
+    private func releaseLoadedAd() {
+        nativeAd?.delegate = nil
+        nativeAd = nil
+        onAdReady?(nil)
     }
 
     private func sendLoadFailure(error: Error, adUnitID: String) {
@@ -150,12 +177,18 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         )
     }
 
-    private func sendLayoutFailure(adUnitID: String) {
+    private func sendLayoutFailure(adUnitID: String, required: CGSize?) {
+        let requirement: String
+        if let required {
+            requirement = "\(Int(ceil(required.width)))x\(Int(ceil(required.height)))"
+        } else {
+            requirement = nativeAdView.minimumContainerDescription
+        }
         eventRelay.send(
             name: "onAdFailedToLoad",
             values: [
                 "code": -1,
-                "description": "native ad container must be at least \(nativeAdView.minimumContainerDescription)",
+                "description": "native ad container must be at least \(requirement)",
                 "adUnitId": adUnitID,
             ]
         )
@@ -164,8 +197,8 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
     private func cancelLoading() {
         guard !isDestroyed else { return }
         requestSequence &+= 1
-        nativeAd?.delegate = nil
-        nativeAd = nil
+        isLoadPending = false
+        releaseLoadedAd()
         adLoader = nil
         nativeAdView.isHidden = true
         eventRelay.clearPendingEvents()
@@ -175,14 +208,25 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         guard !isDestroyed else { return }
         isDestroyed = true
         requestSequence &+= 1
-        nativeAd?.delegate = nil
-        nativeAd = nil
+        if isLoadPending {
+            isLoadPending = false
+            eventRelay.send(
+                name: "onAdFailedToLoad",
+                values: [
+                    "code": -3,
+                    "description": "native ad view was destroyed while loading",
+                    "adUnitId": pendingAdUnitID,
+                ]
+            )
+        }
+        releaseLoadedAd()
         adLoader = nil
         nativeAdView.isHidden = true
         nativeAdDelegate.owner = nil
         eventRelay.detach()
-        methodChannel.setMethodCallHandler(nil)
-        eventChannel.setStreamHandler(nil)
+        onDisposed?()
+        onDisposed = nil
+        onAdReady = nil
     }
 
     private static func requestValues(from arguments: Any?) -> [String: Any?]? {
@@ -261,7 +305,7 @@ private final class NativeAdEventRelay: NSObject, @preconcurrency FlutterStreamH
     }
 }
 
-private enum NativeAdTemplate {
+enum NativeAdTemplate {
     case compact
     case media
 
@@ -288,7 +332,7 @@ private enum NativeAdTemplate {
     }
 }
 
-private struct NativeAdDisplaySize {
+struct NativeAdDisplaySize {
     let width: Int
     let height: Int
 
@@ -298,7 +342,7 @@ private struct NativeAdDisplaySize {
     }
 }
 
-private struct NativeAdStyle {
+struct NativeAdStyle {
     let backgroundColor: UIColor?
     let titleColor: UIColor?
     let bodyColor: UIColor?
@@ -413,14 +457,16 @@ private final class NativeAdTemplateView: NativeAdView {
         self.minimumContainerSize = CGSize(
             width: NativeAdLayoutSize.minimumMediaWidth + padding * 2,
             height: template.mediaHeight + NativeAdLayoutSize.minimumInteractiveSize * 2
-                + NativeAdLayoutSize.stackSpacing * 4 + padding * 2
+                + NativeAdLayoutSize.metadataLine * NativeAdLayoutSize.metadataLineCount
+                + NativeAdLayoutSize.stackSpacing * NativeAdLayoutSize.stackGapCount
+                + padding * 2
         )
         self.bodyLineCount = template.bodyLineCount
         super.init(frame: .zero)
         contentLeading = contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12)
         contentTrailing = contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12)
         contentTop = contentStack.topAnchor.constraint(equalTo: topAnchor, constant: 12)
-        contentBottom = contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12)
+        contentBottom = contentStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -12)
         mediaHeight = media.heightAnchor.constraint(equalToConstant: template.mediaHeight)
         configureLayout()
         bindAssets()
@@ -526,15 +572,14 @@ private final class NativeAdTemplateView: NativeAdView {
             && displaySize.height >= Int(ceil(minimumContainerSize.height))
     }
 
-    func canFitBoundContent(in displaySize: NativeAdDisplaySize) -> Bool {
-        guard canRender(in: displaySize) else { return false }
-        let fittingSize = systemLayoutSizeFitting(
+    /// Size the bound content actually needs at the container width.
+    func boundContentSize(in displaySize: NativeAdDisplaySize) -> CGSize {
+        layoutIfNeeded()
+        return systemLayoutSizeFitting(
             CGSize(width: CGFloat(displaySize.width), height: .greatestFiniteMagnitude),
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-        return fittingSize.width <= CGFloat(displaySize.width)
-            && fittingSize.height <= CGFloat(displaySize.height)
     }
 
     var minimumContainerDescription: String {
@@ -546,4 +591,7 @@ private enum NativeAdLayoutSize {
     static let minimumMediaWidth: CGFloat = 300
     static let minimumInteractiveSize: CGFloat = 64
     static let stackSpacing: CGFloat = 8
+    static let stackGapCount: CGFloat = 5
+    static let metadataLine: CGFloat = 20
+    static let metadataLineCount: CGFloat = 3
 }

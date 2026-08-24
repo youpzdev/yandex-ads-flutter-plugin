@@ -146,7 +146,7 @@ void main() {
     final ad = NativeAd(
       adRequest: const AdRequest(adUnitId: 'unit'),
       width: 324,
-      height: 364,
+      height: 432,
       loadTimeout: const Duration(milliseconds: 20),
     );
     Object? outcome;
@@ -184,18 +184,18 @@ void main() {
 
   test('native templates expose safe minimum sizes and style presets', () {
     expect(NativeAdTemplate.compact.minimumWidth, 324);
-    expect(NativeAdTemplate.compact.minimumHeight, 344);
-    expect(NativeAdTemplate.media.minimumHeight, 364);
+    expect(NativeAdTemplate.compact.minimumHeight, 412);
+    expect(NativeAdTemplate.media.minimumHeight, 432);
     expect(
-      () => NativeAdTemplate.media.validateSize(width: 323, height: 364),
+      () => NativeAdTemplate.media.validateSize(width: 323, height: 432),
       throwsArgumentError,
     );
     expect(
-      () => NativeAdTemplate.media.validateSize(width: 324, height: 363),
+      () => NativeAdTemplate.media.validateSize(width: 324, height: 431),
       throwsArgumentError,
     );
-    NativeAdTemplate.compact.validateSize(width: 324, height: 344);
-    NativeAdTemplate.media.validateSize(width: 324, height: 364);
+    NativeAdTemplate.compact.validateSize(width: 324, height: 412);
+    NativeAdTemplate.media.validateSize(width: 324, height: 432);
     expect(NativeAdStyle.light.backgroundColor, const Color(0xffffffff));
     expect(NativeAdStyle.dark.backgroundColor, const Color(0xff202124));
     expect(
@@ -206,13 +206,13 @@ void main() {
 
   test('native minimum size follows the content padding', () {
     expect(NativeAdTemplate.media.minimumWidthFor(40), 380);
-    expect(NativeAdTemplate.media.minimumHeightFor(40), 420);
-    expect(NativeAdTemplate.compact.minimumHeightFor(0), 320);
+    expect(NativeAdTemplate.media.minimumHeightFor(40), 488);
+    expect(NativeAdTemplate.compact.minimumHeightFor(0), 388);
     expect(
       () => NativeAd(
         adRequest: const AdRequest(adUnitId: 'unit'),
         width: 324,
-        height: 364,
+        height: 432,
         style: const NativeAdStyle(contentPadding: 40),
       ),
       throwsArgumentError,
@@ -220,7 +220,7 @@ void main() {
     final ad = NativeAd(
       adRequest: const AdRequest(adUnitId: 'unit'),
       width: 380,
-      height: 420,
+      height: 488,
       style: const NativeAdStyle(contentPadding: 40),
     );
     addTearDown(ad.destroy);
@@ -231,7 +231,7 @@ void main() {
     final ad = NativeAd(
       adRequest: const AdRequest(adUnitId: 'unit'),
       width: 324,
-      height: 364,
+      height: 432,
     );
     await ad.destroy();
     await ad.destroy();

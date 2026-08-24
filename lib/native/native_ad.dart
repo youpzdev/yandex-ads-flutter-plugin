@@ -66,7 +66,10 @@ class NativeAd with _Ad {
       template: template,
       style: style,
       onPlatformViewCreated: (_) {
-        if (isDestroyed) return;
+        if (isDestroyed) {
+          unawaited(_destroyLateView());
+          return;
+        }
         final recreated = _platformViewCreated;
         _platformViewCreated = true;
         _listenToEvents();
@@ -224,6 +227,12 @@ class NativeAd with _Ad {
     }
     _publishLoadError(
         TimeoutException('Native ad load timed out.', loadTimeout));
+  }
+
+  Future<void> _destroyLateView() async {
+    try {
+      await _channel.invokeMethod<void>('destroy');
+    } catch (_) {}
   }
 
   Future<void> _cancelNativeLoad() async {
