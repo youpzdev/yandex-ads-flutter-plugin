@@ -479,19 +479,19 @@ private final class NativeAdTemplateView: NativeAdView {
         media.translatesAutoresizingMaskIntoConstraints = false
         mediaHeight.isActive = true
 
-        title.font = .preferredFont(forTextStyle: .headline)
+        title.font = .systemFont(ofSize: 16, weight: .semibold)
         title.numberOfLines = 2
-        domain.font = .preferredFont(forTextStyle: .subheadline)
+        domain.font = .systemFont(ofSize: 12)
         domain.numberOfLines = 1
-        warning.font = .preferredFont(forTextStyle: .caption2)
+        warning.font = .systemFont(ofSize: 12)
         warning.numberOfLines = 2
-        sponsored.font = .preferredFont(forTextStyle: .caption1)
+        sponsored.font = .systemFont(ofSize: 12)
         sponsored.numberOfLines = 1
-        price.font = .preferredFont(forTextStyle: .caption1)
+        price.font = .systemFont(ofSize: 12)
         price.numberOfLines = 1
-        body.font = .preferredFont(forTextStyle: .body)
+        body.font = .systemFont(ofSize: 14)
         body.numberOfLines = bodyLineCount
-        callToAction.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        callToAction.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
         callToAction.contentEdgeInsets = .init(top: 8, left: 12, bottom: 8, right: 12)
 
         let titleStack = UIStackView(arrangedSubviews: [title, domain, price])
