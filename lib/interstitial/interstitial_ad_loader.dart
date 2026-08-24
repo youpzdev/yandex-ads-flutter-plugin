@@ -21,8 +21,11 @@ class InterstitialAdLoader extends _FullscreenAdLoader {
   ///
   /// Returns the loaded [InterstitialAd] on success.
   /// Throws [AdRequestError] if the ad fails to load.
-  Future<InterstitialAd> loadAd({required AdRequest adRequest}) async {
-    final result = await _invokeLoad(adRequest);
+  Future<InterstitialAd> loadAd({
+    required AdRequest adRequest,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final result = await _invokeLoad(adRequest, timeout: timeout);
     final name = _FullScreenAdCallbackName.find(result['name'] as String);
     switch (name) {
       case _FullScreenAdCallbackName.onAdLoaded:

@@ -23,6 +23,11 @@ public final class YandexMobileAdsPlugin: NSObject, FlutterPlugin {
         )
         
         registrar.register(factory, withId: "<banner-ad>")
+
+        let nativeAdFactory = MainActor.assumeIsolated {
+            NativeAdViewFactory(messenger: registrar.messenger())
+        }
+        registrar.register(nativeAdFactory, withId: "<native-ad>")
         
         let commandProviders: [CommandProvider] = [
             MobileAdsCommandProvider(),

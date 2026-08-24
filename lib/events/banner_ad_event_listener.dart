@@ -28,25 +28,32 @@ class _BannerAdEventListener {
       final map = result as Map;
       switch (_CallbackName.find(map['name'])) {
         case _CallbackName.onAdLoaded:
-          loadStateController.add(BannerAdLoadStateLoaded(
-            width: map['width'],
-            height: map['height'],
-          ));
+          loadStateController.add(
+            BannerAdLoadStateLoaded(width: map['width'], height: map['height']),
+          );
           break;
         case _CallbackName.onAdFailedToLoad:
-          loadStateController.add(BannerAdLoadStateError(
-            error: AdRequestError(
-                map['code'], map['description'], map['adUnitId']),
-          ));
+          loadStateController.add(
+            BannerAdLoadStateError(
+              error: AdRequestError(
+                map['code'],
+                map['description'],
+                map['adUnitId'],
+              ),
+            ),
+          );
           break;
         case _CallbackName.onAdClicked:
           eventsController.add(BannerAdClickedEvent());
           break;
         case _CallbackName.onImpression:
-          eventsController.add(BannerAdImpressionEvent(
-            impressionData:
-                _SimpleImpressionData(rawData: map['impressionData'] ?? ""),
-          ));
+          eventsController.add(
+            BannerAdImpressionEvent(
+              impressionData: _SimpleImpressionData(
+                rawData: map['impressionData'] ?? "",
+              ),
+            ),
+          );
           break;
         default:
           break;
@@ -54,7 +61,7 @@ class _BannerAdEventListener {
     });
   }
 
-  void dispose() {
-    _subscription?.cancel();
+  Future<void> dispose() async {
+    await _subscription?.cancel();
   }
 }

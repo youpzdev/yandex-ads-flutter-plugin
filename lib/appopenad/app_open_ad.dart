@@ -13,33 +13,38 @@ part of '../mobile_ads.dart';
 class AppOpenAd extends _FullscreenAd {
   static const _channelPath = 'yandex_mobileads.appOpenAd';
 
-  AppOpenAd._({
-    required super.channelName,
-    required super.id,
-    super.adInfo,
-  });
+  AppOpenAd._({required super.channelName, required super.id, super.adInfo});
 
-  static AppOpenAd _create({
-    required int id,
-    required AdInfo adInfo,
-  }) {
+  static AppOpenAd _create({required int id, required AdInfo adInfo}) {
     return AppOpenAd._(channelName: _channelPath, id: id, adInfo: adInfo);
   }
 
-  Future<void> setAdEventListener(
-      {required AppOpenAdEventListener eventListener}) async {
-    _setAdEventListener(
-        eventListener: _FullScreenAdEventListener(
-            channelName: '${_channel.name}.events',
-            onAdShown: eventListener.onAdShown,
-            onAdFailedToShow: eventListener.onAdFailedToShow,
-            onAdDismissed: eventListener.onAdDismissed,
-            onAdClicked: eventListener.onAdClicked,
-            onAdImpression: eventListener.onAdImpression));
+  Future<void> setAdEventListener({
+    required AppOpenAdEventListener eventListener,
+  }) async {
+    await _setAdEventListener(
+      eventListener: _FullScreenAdEventListener(
+        channelName: '${_channel.name}.events',
+        onAdShown: eventListener.onAdShown,
+        onAdFailedToShow: eventListener.onAdFailedToShow,
+        onAdDismissed: eventListener.onAdDismissed,
+        onAdClicked: eventListener.onAdClicked,
+        onAdImpression: eventListener.onAdImpression,
+      ),
+    );
   }
 
   @override
   Future<void> waitForDismiss() async {
-    await _eventListener?.waitFor([_FullScreenAdCallbackName.onAdDismissed]);
+    final listener = _eventListener;
+    if (listener == null) {
+      throw StateError(
+        'Set an ad event listener before waiting for dismissal.',
+      );
+    }
+    final event = await listener.waitForTerminal();
+    if (event['name'] == _FullScreenAdCallbackName.onAdFailedToShow.name) {
+      throw AdError(event['description']);
+    }
   }
 }

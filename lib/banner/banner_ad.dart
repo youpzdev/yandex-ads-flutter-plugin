@@ -32,7 +32,9 @@ class BannerAd with _Ad {
 
   Widget? _widget;
   bool _isPlatformViewCreated = false;
-  bool _isDestroyed = false;
+  Future<void>? _bannerDestroyFuture;
+  Future<void>? _loadFuture;
+  final _platformViewCreated = Completer<void>();
 
   final _loadStateController = StreamController<BannerAdLoadState>.broadcast();
   final _eventsController = StreamController<BannerAdEvent>.broadcast();
@@ -49,6 +51,7 @@ class BannerAd with _Ad {
   Stream<BannerAdEvent> get events => _eventsController.stream;
 
   late final _BannerAdEventListener _eventListener;
+  late final StreamSubscription<BannerAdLoadState> _loadStateSubscription;
 
   BannerAd({required this.adSize}) {
     _eventListener = _BannerAdEventListener(
@@ -57,7 +60,7 @@ class BannerAd with _Ad {
       eventsController: _eventsController,
     );
 
-    _loadStateController.stream.listen((state) {
+    _loadStateSubscription = _loadStateController.stream.listen((state) {
       _loadState = state;
     });
   }
@@ -68,11 +71,26 @@ class BannerAd with _Ad {
   /// immediately, then [BannerAdLoadStateLoaded] or [BannerAdLoadStateError]
   /// when the native side responds.
   Future<void> load(AdRequest adRequest) async {
-    if (_isDestroyed) {
-      throw StateError('BannerAd is destroyed and cannot be used anymore.');
+    ensureAlive();
+    if (_loadFuture != null) {
+      throw StateError('Another banner ad load is already in progress.');
     }
 
+    late final Future<void> load;
+    load = _load(adRequest);
+    _loadFuture = load;
+    try {
+      await load;
+    } finally {
+      if (identical(_loadFuture, load)) {
+        _loadFuture = null;
+      }
+    }
+  }
+
+  Future<void> _load(AdRequest adRequest) async {
     await (YandexAds._initFuture ?? Future<void>.value());
+    ensureAlive();
 
     _loadState = BannerAdLoadStateLoading();
     _loadStateController.add(_loadState);
@@ -82,33 +100,65 @@ class BannerAd with _Ad {
         adSize: adSize,
         id: _id,
         onPlatformViewCreated: (_) {
+          if (isDestroyed) return;
           _isPlatformViewCreated = true;
           _eventListener.setupCallbacks();
-          _invokeLoad(adRequest);
+          if (!_platformViewCreated.isCompleted) {
+            _platformViewCreated.complete();
+          }
         },
       );
-    } else {
-      _invokeLoad(adRequest);
     }
+    await _platformViewCreated.future;
+    ensureAlive();
+    await _invokeLoad(adRequest);
   }
 
-  void _invokeLoad(AdRequest adRequest) {
+  Future<void> _invokeLoad(AdRequest adRequest) async {
     final map = adRequest._toMap();
     map[_adUnitIdKey] = adRequest.adUnitId;
     map['parameters'] = {
       _pluginType: _flutter,
       _pluginVersion: YandexAds.pluginVersion,
     }..addAll(adRequest.parameters ?? {});
-    _channel.invokeMethod('load', map);
+    try {
+      await _channel.invokeMethod<void>('load', map);
+    } on PlatformException catch (error) {
+      if (!_loadStateController.isClosed) {
+        _loadStateController.add(
+          BannerAdLoadStateError(
+            error: AdRequestError(
+              -1,
+              error.message ?? error.code,
+              adRequest.adUnitId,
+            ),
+          ),
+        );
+      }
+      rethrow;
+    }
   }
 
   @override
-  Future<void> destroy() async {
-    _isDestroyed = true;
-    _eventListener.dispose();
-    await _loadStateController.close();
-    await _eventsController.close();
-    await super.destroy();
+  Future<void> destroy() {
+    return _bannerDestroyFuture ??= _destroyBanner();
+  }
+
+  Future<void> _destroyBanner() async {
+    if (!_platformViewCreated.isCompleted && _loadFuture != null) {
+      _platformViewCreated.completeError(
+        StateError(
+            'Banner ad was destroyed before its platform view was ready.'),
+      );
+    }
+    try {
+      await super.destroy();
+    } finally {
+      await _eventListener.dispose();
+      await _loadStateSubscription.cancel();
+      await _loadStateController.close();
+      await _eventsController.close();
+    }
   }
 }
 
@@ -118,10 +168,7 @@ class BannerAd with _Ad {
 class AdWidget extends StatefulWidget {
   final BannerAd bannerAd;
 
-  const AdWidget({
-    super.key,
-    required this.bannerAd,
-  });
+  const AdWidget({super.key, required this.bannerAd});
 
   @override
   State<AdWidget> createState() => _AdWidgetState();

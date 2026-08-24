@@ -32,4 +32,31 @@ class _IosInterface implements _PlatformInterface {
       onPlatformViewCreated: onPlatformViewCreated,
     );
   }
+
+  @override
+  Widget buildNativeAd({
+    required int id,
+    required int width,
+    required int height,
+    required NativeAdTemplate template,
+    required NativeAdStyle style,
+    required void Function(int id) onPlatformViewCreated,
+  }) {
+    return UiKitView(
+      viewType: '<native-ad>',
+      layoutDirection: TextDirection.ltr,
+      creationParams: {
+        'id': id,
+        'width': width,
+        'height': height,
+        'template': template.name,
+        'style': style._toMap(),
+      },
+      creationParamsCodec: const StandardMessageCodec(),
+      gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+        Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+      },
+      onPlatformViewCreated: onPlatformViewCreated,
+    );
+  }
 }

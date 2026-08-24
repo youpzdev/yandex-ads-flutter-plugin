@@ -30,7 +30,9 @@ class _FullScreenAdEventListener {
   /// Notifies that the user should be rewarded for viewing an ad (impression counted).
   final void Function(Reward reward)? onRewarded;
 
-  late Stream eventStream;
+  StreamSubscription<Map<dynamic, dynamic>>? _subscription;
+  final Completer<Map<dynamic, dynamic>> _terminalEvent = Completer();
+  Reward? reward;
 
   _FullScreenAdEventListener({
     required this.channelName,
@@ -40,40 +42,76 @@ class _FullScreenAdEventListener {
     this.onAdClicked,
     this.onAdImpression,
     this.onRewarded,
-  });
-
-  Future<void> setupCallbacks() async {
-    eventStream = EventChannel(channelName).receiveBroadcastStream();
-    await for (Map result in eventStream) {
-      switch (_FullScreenAdCallbackName.find(result['name'])) {
-        case _FullScreenAdCallbackName.onAdShown:
-          onAdShown?.call();
-          break;
-        case _FullScreenAdCallbackName.onAdFailedToShow:
-          onAdFailedToShow?.call(AdError(result['description']));
-          break;
-        case _FullScreenAdCallbackName.onAdClicked:
-          onAdClicked?.call();
-          break;
-        case _FullScreenAdCallbackName.onAdDismissed:
-          onAdDismissed?.call();
-          break;
-        case _FullScreenAdCallbackName.onAdImpression:
-          onAdImpression?.call(
-              _SimpleImpressionData(rawData: result['impressionData'] ?? ""));
-          break;
-        case _FullScreenAdCallbackName.onRewarded:
-          onRewarded?.call(Reward._(result['type'], result['amount']));
-          break;
-        default:
-          break;
-      }
-    }
+  }) {
+    unawaited(_terminalEvent.future.then<void>((_) {}, onError: (Object _) {}));
   }
 
-  Future<Map> waitFor(List<_FullScreenAdCallbackName> names) async {
-    return await eventStream.firstWhere((result) {
-      return names.any((name) => result['name'] == name.name);
-    });
+  void setupCallbacks() {
+    _subscription = EventChannel(channelName)
+        .receiveBroadcastStream()
+        .map(
+          (event) => Map<dynamic, dynamic>.from(event as Map),
+        )
+        .listen(
+      (result) {
+        switch (_FullScreenAdCallbackName.find(result['name'])) {
+          case _FullScreenAdCallbackName.onAdShown:
+            onAdShown?.call();
+            break;
+          case _FullScreenAdCallbackName.onAdFailedToShow:
+            final error = AdError(result['description']);
+            _completeTerminal(result);
+            onAdFailedToShow?.call(error);
+            break;
+          case _FullScreenAdCallbackName.onAdClicked:
+            onAdClicked?.call();
+            break;
+          case _FullScreenAdCallbackName.onAdDismissed:
+            _completeTerminal(result);
+            onAdDismissed?.call();
+            break;
+          case _FullScreenAdCallbackName.onAdImpression:
+            onAdImpression?.call(
+              _SimpleImpressionData(rawData: result['impressionData'] ?? ""),
+            );
+            break;
+          case _FullScreenAdCallbackName.onRewarded:
+            reward = Reward._(result['type'], result['amount']);
+            onRewarded?.call(reward!);
+            break;
+          default:
+            break;
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!_terminalEvent.isCompleted) {
+          _terminalEvent.completeError(error, stackTrace);
+        }
+      },
+      onDone: () {
+        if (!_terminalEvent.isCompleted) {
+          _terminalEvent.completeError(
+            StateError('Fullscreen ad event stream closed before dismissal.'),
+          );
+        }
+      },
+    );
+  }
+
+  void _completeTerminal(Map<dynamic, dynamic> result) {
+    if (_terminalEvent.isCompleted) return;
+    _terminalEvent.complete(result);
+    unawaited(_subscription?.cancel());
+  }
+
+  Future<Map<dynamic, dynamic>> waitForTerminal() => _terminalEvent.future;
+
+  Future<void> dispose() async {
+    if (!_terminalEvent.isCompleted) {
+      _terminalEvent.completeError(
+        StateError('Fullscreen ad listener was disposed before dismissal.'),
+      );
+    }
+    await _subscription?.cancel();
   }
 }

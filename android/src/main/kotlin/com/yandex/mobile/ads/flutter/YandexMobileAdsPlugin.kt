@@ -21,6 +21,7 @@ import com.yandex.mobile.ads.flutter.common.MobileAdsCommandHandlerProvider
 import com.yandex.mobile.ads.flutter.common.command.MobileAdsCommand
 import com.yandex.mobile.ads.flutter.common.command.MobileAdsCommandHandler
 import com.yandex.mobile.ads.flutter.interstitial.command.CreateInterstitialAdLoaderCommandHandler
+import com.yandex.mobile.ads.flutter.nativead.NativeAdViewFactory
 import com.yandex.mobile.ads.flutter.rewarded.command.CreateRewardedAdLoaderCommandHandler
 import com.yandex.mobile.ads.flutter.util.ActivityContextHolder
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -36,9 +37,12 @@ class YandexMobileAdsPlugin : FlutterPlugin, ActivityAware {
 
     override fun onAttachedToEngine(binding: FlutterPluginBinding) {
         val factory = BannerAdViewFactory(binding.binaryMessenger)
+        val nativeAdViewFactory = NativeAdViewFactory(binding.binaryMessenger)
         val applicationContext = binding.applicationContext
         binding.platformViewRegistry
             .registerViewFactory(BANNER_VIEW_TYPE, factory)
+        binding.platformViewRegistry
+            .registerViewFactory(NATIVE_AD_VIEW_TYPE, nativeAdViewFactory)
 
         val providers = listOf(
             getMobileAdsCommandHandlerProvider(applicationContext),
@@ -131,6 +135,7 @@ class YandexMobileAdsPlugin : FlutterPlugin, ActivityAware {
 
         const val ROOT = "yandex_mobileads"
         const val BANNER_VIEW_TYPE = "<banner-ad>"
+        const val NATIVE_AD_VIEW_TYPE = "<native-ad>"
 
         const val BANNER_AD_SIZE = "bannerAdSize"
 

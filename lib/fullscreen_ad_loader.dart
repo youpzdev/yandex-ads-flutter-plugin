@@ -14,18 +14,22 @@ abstract class _FullscreenAdLoader {
   static const _pluginVersion = 'plugin_version';
   static const _flutter = 'flutter';
 
-  static const _createChannel =
-      MethodChannel('yandex_mobileads.createAdLoader');
+  static const _createChannel = MethodChannel(
+    'yandex_mobileads.createAdLoader',
+  );
 
   static var _nextId = 0;
 
   late final int _id;
   late final MethodChannel _channel;
-  late final Future<void> _initialized;
+  Future<void>? _initialization;
   StreamSubscription? _eventSubscription;
+  bool _destroyed = false;
+  Future<void>? _destroyFuture;
 
   int _nextRequestId = 0;
   final _pendingLoads = <int, Completer<Map<String, dynamic>>>{};
+  _PendingFullscreenLoad? _activeLoad;
 
   void _init(String loaderType, String channelPath) {
     _id = _nextId++;
@@ -33,15 +37,40 @@ abstract class _FullscreenAdLoader {
     _channel = MethodChannel(name);
     _finalizer.attach(this, _channel, detach: this);
 
-    _initialized =
-        _createChannel.invokeMethod(loaderType, {'id': _id}).then((_) {
-      // Subscribe to EventChannel only AFTER native has created it
-      final eventChannel = EventChannel('$name.events');
-      _eventSubscription =
-          eventChannel.receiveBroadcastStream().listen((event) {
-        _dispatchEvent(Map<String, dynamic>.from(event as Map));
-      });
-    });
+    _loaderType = loaderType;
+  }
+
+  late final String _loaderType;
+
+  Future<void> _ensureInitialized() async {
+    final active = _initialization;
+    if (active != null) {
+      await active;
+      return;
+    }
+
+    final initialization = _initialize();
+    _initialization = initialization;
+    try {
+      await initialization;
+    } catch (_) {
+      if (identical(_initialization, initialization)) {
+        _initialization = null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _initialize() async {
+    await _createChannel.invokeMethod<void>(_loaderType, {'id': _id});
+    final eventChannel = EventChannel('${_channel.name}.events');
+    _eventSubscription = eventChannel.receiveBroadcastStream().listen(
+          (event) => _dispatchEvent(Map<String, dynamic>.from(event as Map)),
+          onError: _completePendingWithError,
+          onDone: () => _completePendingWithError(
+            StateError('Ad loader event stream closed before completion.'),
+          ),
+        );
   }
 
   void _dispatchEvent(Map<String, dynamic> result) {
@@ -52,31 +81,148 @@ abstract class _FullscreenAdLoader {
   }
 
   /// Loads an ad with the given [AdRequest].
-  Future<Map<String, dynamic>> _invokeLoad(AdRequest adRequest) async {
-    await (YandexAds._initFuture ?? Future<void>.value());
-    await _initialized;
-    final requestId = _nextRequestId++;
-    final completer = Completer<Map<String, dynamic>>();
-    _pendingLoads[requestId] = completer;
+  Future<Map<String, dynamic>> _invokeLoad(
+    AdRequest adRequest, {
+    required Duration timeout,
+  }) async {
+    if (_destroyed) {
+      throw StateError('Ad loader is destroyed and cannot be used anymore.');
+    }
+    if (_activeLoad != null) {
+      throw StateError('Another ad load is already in progress.');
+    }
+    final pending = _PendingFullscreenLoad();
+    _activeLoad = pending;
+    final timeoutTimer = Timer(
+      timeout,
+      () => unawaited(_completeTimedOutLoad(pending, timeout)),
+    );
 
-    final map = adRequest._toMap();
-    map['requestId'] = requestId;
-    map['parameters'] = {
-      _pluginType: _flutter,
-      _pluginVersion: YandexAds.pluginVersion,
-    }..addAll(adRequest.parameters ?? {});
+    try {
+      final initialization = (YandexAds._initFuture ?? Future<void>.value())
+          .then((_) => _ensureInitialized());
+      await Future.any<void>([
+        initialization,
+        pending.completer.future.then<void>((_) {}),
+      ]);
+      if (_destroyed) {
+        throw StateError('Ad loader is destroyed and cannot be used anymore.');
+      }
+      if (pending.cancelled) {
+        return await pending.completer.future;
+      }
 
-    _channel.invokeMethod('load', map);
-    return completer.future;
+      final requestId = _nextRequestId++;
+      pending.requestId = requestId;
+      _pendingLoads[requestId] = pending.completer;
+      final map = adRequest._toMap();
+      map['requestId'] = requestId;
+      map['parameters'] = {
+        _pluginType: _flutter,
+        _pluginVersion: YandexAds.pluginVersion,
+      }..addAll(adRequest.parameters ?? {});
+
+      pending.nativeLoadStarted = true;
+      await Future.any<void>([
+        _channel.invokeMethod<void>('load', map),
+        pending.completer.future.then<void>((_) {}),
+      ]);
+      return await pending.completer.future;
+    } finally {
+      timeoutTimer.cancel();
+      final requestId = pending.requestId;
+      if (requestId != null) {
+        _pendingLoads.remove(requestId);
+      }
+      if (identical(_activeLoad, pending)) {
+        _activeLoad = null;
+      }
+    }
   }
 
-  void cancelLoading() {
-    _channel.invokeMethod('cancelLoading');
+  Future<void> _cancelNativeLoad(_PendingFullscreenLoad pending) async {
+    if (!pending.nativeLoadStarted || _destroyed) return;
+    try {
+      await _channel.invokeMethod<void>('cancelLoading');
+    } catch (_) {
+      if (!pending.completer.isCompleted) {
+        rethrow;
+      }
+    }
   }
 
-  void destroy() {
-    _channel.invokeMethod('destroy');
-    _eventSubscription?.cancel();
+  Future<void> _completeTimedOutLoad(
+    _PendingFullscreenLoad pending,
+    Duration timeout,
+  ) async {
+    if (pending.completer.isCompleted) return;
+    pending.cancelled = true;
+    try {
+      await _cancelNativeLoad(pending);
+    } catch (_) {}
+    if (!pending.completer.isCompleted) {
+      pending.completer.completeError(
+        TimeoutException('Ad load timed out.', timeout),
+      );
+    }
+  }
+
+  Future<void> cancelLoading() async {
+    if (_destroyed) return;
+    final pending = _activeLoad;
+    if (pending == null) return;
+    pending.cancelled = true;
+    await _cancelNativeLoad(pending);
+    if (!pending.completer.isCompleted) {
+      pending.completer.completeError(
+        StateError('Ad loading was cancelled.'),
+        StackTrace.current,
+      );
+    }
+  }
+
+  Future<void> destroy() {
+    return _destroyFuture ??= _destroy();
+  }
+
+  Future<void> _destroy() async {
+    if (_destroyed) return;
+    _destroyed = true;
     _finalizer.detach(this);
+    _completePendingWithError(
+      StateError('Ad loader was destroyed.'),
+      StackTrace.current,
+    );
+    final initialization = _initialization;
+    if (initialization != null) {
+      try {
+        await initialization;
+      } catch (_) {
+        return;
+      }
+    }
+    await _eventSubscription?.cancel();
+    await _channel.invokeMethod<void>('destroy');
   }
+
+  void _completePendingWithError(Object error, [StackTrace? stackTrace]) {
+    final pending = _pendingLoads.values.toSet();
+    final active = _activeLoad;
+    if (active != null) {
+      pending.add(active.completer);
+    }
+    _pendingLoads.clear();
+    for (final completer in pending) {
+      if (!completer.isCompleted) {
+        completer.completeError(error, stackTrace ?? StackTrace.current);
+      }
+    }
+  }
+}
+
+class _PendingFullscreenLoad {
+  final Completer<Map<String, dynamic>> completer = Completer();
+  int? requestId;
+  bool nativeLoadStarted = false;
+  bool cancelled = false;
 }

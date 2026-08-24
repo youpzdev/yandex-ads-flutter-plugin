@@ -19,14 +19,12 @@ abstract class _FullscreenAd with _Ad {
   @override
   String get methodChannelName => '$channelName.$id';
 
-  _FullscreenAd({
-    required this.channelName,
-    required this.id,
-    this.adInfo,
-  });
+  _FullscreenAd({required this.channelName, required this.id, this.adInfo});
 
-  Future<void> _setAdEventListener(
-      {required _FullScreenAdEventListener eventListener}) async {
+  Future<void> _setAdEventListener({
+    required _FullScreenAdEventListener eventListener,
+  }) async {
+    await _eventListener?.dispose();
     _eventListener = eventListener;
     _eventListener?.setupCallbacks();
   }
@@ -36,8 +34,15 @@ abstract class _FullscreenAd with _Ad {
   /// Set an event listener before calling this method for callbacks
   /// about events that occur when an ad is displayed.
   Future<void> show() async {
-    _channel.invokeMethod('show');
+    ensureAlive();
+    await _channel.invokeMethod<void>('show');
   }
 
   Future waitForDismiss();
+
+  @override
+  Future<void> destroy() async {
+    await _eventListener?.dispose();
+    await super.destroy();
+  }
 }

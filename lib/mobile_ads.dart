@@ -14,6 +14,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 part 'ad.dart';
@@ -28,6 +29,9 @@ part 'simple_impression_data.dart';
 part 'banner/banner_ad_size.dart';
 part 'banner/banner_ad_state.dart';
 part 'banner/banner_ad.dart';
+part 'banner/managed_banner_ad.dart';
+part 'native/native_ad_state.dart';
+part 'native/native_ad.dart';
 part 'events/callback_name.dart';
 part 'events/fullscreen_callback_name.dart';
 part 'events/error.dart';
@@ -115,8 +119,21 @@ class YandexAds {
   /// Initializes the Mobile Ads SDK.
   /// Call this in the `initState` method of your app widget.
   static Future<void> initialize() async {
-    _initFuture ??= _channel.invokeMethod('initialize').then((_) {});
-    await _initFuture!;
+    final active = _initFuture;
+    if (active != null) {
+      await active;
+      return;
+    }
+    final initialization = _channel.invokeMethod<void>('initialize');
+    _initFuture = initialization;
+    try {
+      await initialization;
+    } catch (_) {
+      if (identical(_initFuture, initialization)) {
+        _initFuture = null;
+      }
+      rethrow;
+    }
   }
 
   /// Shows Debug Panel.

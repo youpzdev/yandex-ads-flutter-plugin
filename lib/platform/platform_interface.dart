@@ -20,13 +20,23 @@ abstract class _PlatformInterface {
         return _IosInterface();
       default:
         throw UnsupportedError(
-            'This plugin is only supported on Android and iOS.');
+          'This plugin is only supported on Android and iOS.',
+        );
     }
   }
 
   Widget buildBannerAd({
     required BannerAdSize adSize,
     required int id,
+    required void Function(int id) onPlatformViewCreated,
+  });
+
+  Widget buildNativeAd({
+    required int id,
+    required int width,
+    required int height,
+    required NativeAdTemplate template,
+    required NativeAdStyle style,
     required void Function(int id) onPlatformViewCreated,
   });
 }
