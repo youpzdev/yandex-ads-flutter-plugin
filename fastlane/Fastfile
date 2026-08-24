@@ -1,0 +1,65 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+import '../../ios/fastlane/Fastfile'
+
+platform :ios do
+    desc 'Increment build number'
+    lane :increment_build do |options|
+        auth_app_store()
+
+        project_path = options[:project_path]
+        app_version = get_version_number(xcodeproj: project_path)
+
+        latest_build_number = app_store_build_number(
+            live: false,
+            app_identifier: options[:bundle_id],
+            version: app_version,
+            initial_build_number: 1
+        )
+
+        increment_build_number(
+            build_number: "#{latest_build_number.to_i + 1}",
+            xcodeproj: project_path
+        )
+
+        add_output_parameter("testflight_version", "#{app_version} (#{latest_build_number + 1})")
+    end
+
+    desc 'Uploads app to TestFlight'
+    lane :upload_to_testflight do |options|
+        auth_app_store()
+
+        ipa_path = options[:ipa_path]
+        app_version = get_ipa_info_plist_value(ipa: ipa_path, key: "CFBundleVersion")
+
+        testflight(
+            team_id: ENV["ASC_TEAM_ID"],
+            apple_id: ENV["ASC_APPLE_ID"],
+            app_identifier: options[:bundle_id],
+            app_version: app_version,
+            ipa: ipa_path,
+            changelog: ''
+        )
+    end
+end
+
+def auth_app_store()
+    app_store_connect_api_key(
+        key_id: ENV["ASC_KEY_ID"],
+        issuer_id: ENV["ASC_ISSUER_ID"],
+        key_filepath: ENV["ASC_KEY_CONTENT"]
+    )
+end

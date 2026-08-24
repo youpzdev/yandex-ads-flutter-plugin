@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "appium": "^3.1.2"
+  },
+  "devDependencies": {
+    "appium-espresso-driver": "^6.3.2",
+    "appium-xcuitest-driver": "^10.14.12"
+  },
+  "scripts": {}
+}

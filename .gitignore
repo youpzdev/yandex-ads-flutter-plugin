@@ -20,6 +20,7 @@ pubspec.lock
 .packages
 .pub-cache/
 .pub/
+/build/
 
 # Intellij IDEA
 *.iml
@@ -64,6 +65,7 @@ app.*.map.json
 .kotlin
 
 settings.local.json
+.work/
 ### AI agents ###
 .claude/*
 !.claude/settings.json

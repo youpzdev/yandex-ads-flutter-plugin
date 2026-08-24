@@ -1,0 +1,28 @@
+<!DOCTYPE suite SYSTEM "http://testng.org/testng-1.0.dtd">
+<suite name="Parallel suite" parallel="tests" thread-count="2">
+    <listeners>
+        <listener class-name="com.yandex.plugin_tests_support.AnnotationTransformer"/>
+        <listener class-name="com.yandex.testcop.testng.TestCopTestNGListener"/>
+    </listeners>
+    <test name="Suite 1">
+        <parameter name="emulatorName" value="google-1" />
+        <parameter name="simulatorName" value="Test Device 1" />
+        <parameter name="wdaPort" value="5701" />
+        <parameter name="snifferPort" value="5801"/>
+        <classes>
+            <class name="smoke_tests.AppOpenAdTests" />
+            <class name="smoke_tests.InterstitialTests" />
+            <class name="smoke_tests.SettingsTest" />
+        </classes>
+    </test>
+    <test name="Suite 2">
+        <parameter name="emulatorName" value="google-2" />
+        <parameter name="simulatorName" value="Test Device 2" />
+        <parameter name="wdaPort" value="5702" />
+        <parameter name="snifferPort" value="5802"/>
+        <classes>
+            <class name="smoke_tests.BannerTests" />
+            <class name="smoke_tests.RewardedTests" />
+        </classes>
+    </test>
+</suite>

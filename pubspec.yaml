@@ -1,0 +1,36 @@
+#
+# This file is a part of the Yandex Advertising Network
+#
+# Version for Flutter (C) 2022 YANDEX
+#
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at https://legal.yandex.com/partner_ch/
+#
+
+name: yandex_mobileads
+description: Flutter plugin for Yandex Mobile Ads SDK. This plugin allows Flutter developers to easily integrate Yandex Mobile Ads SDK on Android and iOS apps.
+version: 8.3.0
+homepage: https://ads.yandex.com/monetization
+
+environment:
+  sdk: ">=2.17.6 <4.0.0"
+  flutter: ">=2.5.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.yandex.mobile.ads.flutter
+        pluginClass: YandexMobileAdsPlugin
+      ios:
+        pluginClass: YandexMobileAdsPlugin
