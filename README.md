@@ -56,6 +56,10 @@ exposes `showTimestamps` so the history can be persisted between launches.
 Presets are `conservative`, `standard`, `engaged` and `unlimited`. Only shows
 that reached the user consume a cap.
 
+Daily caps only mean something across launches, so persist `gate.toJson()` and
+restore it with `AdFrequencyGate.fromJson`. The payload holds show timestamps
+and nothing else.
+
 ### App open ads
 
 `AppOpenAdController` preloads an app open ad and shows it when the user comes

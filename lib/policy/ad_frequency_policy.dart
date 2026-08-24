@@ -232,6 +232,48 @@ class AdFrequencyGate {
     _forget(moment);
   }
 
+  /// The history in a form that survives an app restart.
+  ///
+  /// Daily caps only mean something when the history outlives the process, so
+  /// persist this map and hand it back to [AdFrequencyGate.fromJson] on the
+  /// next launch. It contains no user data — only the moments ads were shown.
+  Map<String, Object?> toJson() => {
+        'shows': _shows
+            .map((show) => show.toUtc().millisecondsSinceEpoch)
+            .toList(growable: false),
+      };
+
+  /// Restores a gate from [toJson].
+  ///
+  /// Timestamps that are unreadable or in the future are dropped rather than
+  /// trusted: a clock change must not unlock an exhausted cap.
+  static AdFrequencyGate fromJson(
+    Map<String, Object?> json, {
+    AdFrequencyPolicy policy = AdFrequencyPolicy.standard,
+    DateTime Function()? clock,
+    DateTime? sessionStart,
+  }) {
+    final now = (clock ?? DateTime.now)();
+    final raw = json['shows'];
+    final shows = <DateTime>[];
+    if (raw is List) {
+      for (final entry in raw) {
+        if (entry is! num) continue;
+        final moment =
+            DateTime.fromMillisecondsSinceEpoch(entry.toInt(), isUtc: true)
+                .toLocal();
+        if (moment.isAfter(now)) continue;
+        shows.add(moment);
+      }
+    }
+    return AdFrequencyGate(
+      policy: policy,
+      clock: clock,
+      history: shows,
+      sessionStart: sessionStart,
+    );
+  }
+
   /// Drops the recorded history, for example after a consent change.
   void reset() {
     _shows.clear();

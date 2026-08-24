@@ -175,6 +175,45 @@ void main() {
       expect(gate.sessionShowCount, 1);
     });
 
+    test('history survives a restart and ignores future timestamps', () {
+      final gate = AdFrequencyGate(
+        policy: const AdFrequencyPolicy(
+          startupGrace: Duration.zero,
+          minimumInterval: Duration.zero,
+          maximumPerHour: null,
+          maximumPerDay: 2,
+        ),
+        clock: clock,
+      );
+      gate.recordShow();
+
+      final stored = <String, Object?>{
+        'shows': [
+          ...(gate.toJson()['shows']! as List),
+          now.add(const Duration(days: 1)).millisecondsSinceEpoch,
+          'not a timestamp',
+        ],
+      };
+
+      final restored = AdFrequencyGate.fromJson(
+        stored,
+        policy: const AdFrequencyPolicy(
+          startupGrace: Duration.zero,
+          minimumInterval: Duration.zero,
+          maximumPerHour: null,
+          maximumPerDay: 2,
+        ),
+        clock: clock,
+      );
+
+      expect(restored.showTimestamps, hasLength(1));
+      expect(restored.sessionShowCount, 0);
+      expect(restored.isAllowed, isTrue);
+
+      restored.recordShow();
+      expect(restored.evaluate().block, AdFrequencyBlock.dailyCap);
+    });
+
     test('presets stay inside safe bounds', () {
       expect(
         AdFrequencyPolicy.conservative.minimumInterval,
