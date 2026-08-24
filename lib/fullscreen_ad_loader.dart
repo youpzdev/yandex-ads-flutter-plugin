@@ -78,13 +78,25 @@ abstract class _FullscreenAdLoader {
 
   void _dispatchEvent(Map<String, dynamic> result) {
     final name = result['name'];
+    final requestId = result['requestId'] as int?;
+    final completer =
+        requestId == null ? null : _pendingLoads.remove(requestId);
+
     if (name == _FullScreenAdCallbackName.onAdLoaded.name) {
+      if (completer == null) {
+        // The request was cancelled or timed out before this answer arrived.
+        // The native side has already built an ad and two channels for it, and
+        // nothing in Dart owns them any more, so release them here.
+        unawaited(_discardOrphanAd(result['id'] as int?));
+        return;
+      }
       _AdEventBus.emit(
         type: AdEventType.loaded,
         format: _format,
         adUnitId: result['adUnitId'] as String?,
       );
-    } else if (name == _FullScreenAdCallbackName.onAdFailedToLoad.name) {
+    } else if (name == _FullScreenAdCallbackName.onAdFailedToLoad.name &&
+        completer != null) {
       _AdEventBus.emit(
         type: AdEventType.failedToLoad,
         format: _format,
@@ -96,10 +108,30 @@ abstract class _FullscreenAdLoader {
         ),
       );
     }
-    final requestId = result['requestId'] as int?;
-    if (requestId == null) return;
-    final completer = _pendingLoads.remove(requestId);
     completer?.complete(result);
+  }
+
+  String get _adChannelPath {
+    switch (_format) {
+      case AdFormat.interstitial:
+        return InterstitialAd._channelPath;
+      case AdFormat.rewarded:
+        return RewardedAd._channelPath;
+      case AdFormat.appOpen:
+        return AppOpenAd._channelPath;
+      case AdFormat.banner:
+      case AdFormat.native:
+        return '';
+    }
+  }
+
+  Future<void> _discardOrphanAd(int? id) async {
+    if (id == null) return;
+    final path = _adChannelPath;
+    if (path.isEmpty) return;
+    try {
+      await MethodChannel('$path.$id').invokeMethod<void>('destroy');
+    } catch (_) {}
   }
 
   /// Loads an ad with the given [AdRequest].

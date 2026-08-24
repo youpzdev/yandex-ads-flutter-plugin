@@ -47,7 +47,7 @@ internal abstract class FullScreenEventListener : EventChannel.StreamHandler {
 
         const val ON_AD_CLICKED = "onAdClicked"
         const val ON_AD_SHOWN = "onAdShown"
-        const val ON_AD_FAILED_TO_SHOW = "onAdShown"
+        const val ON_AD_FAILED_TO_SHOW = "onAdFailedToShow"
         const val ON_AD_DISMISSED = "onAdDismissed"
         const val ON_REWARDED = "onRewarded"
         const val ON_AD_IMPRESSION = "onAdImpression"

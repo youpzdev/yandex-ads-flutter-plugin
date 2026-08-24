@@ -25,6 +25,20 @@
 * Ads loaded before a `setUserConsent` or `setAgeRestricted` change are dropped
   instead of being shown under an answer the user has replaced.
 
+### Fixed in the native bridge
+
+* Android reported a failed show as `onAdShown`: the constant for
+  `onAdFailedToShow` carried the wrong name, so a refused show looked
+  successful, never reached its terminal event and consumed a frequency cap.
+* A load that answers after its timeout or cancellation no longer leaves a
+  native ad and its two channels alive, and no longer reports a phantom load.
+* An ad requested before a consent, age or location change is dropped when the
+  answer arrives after it, instead of being shown with the old targeting.
+* Reward callbacks are delivered once per view. A client callback is not proof
+  of a view: verify valuable rewards on your own server.
+* The local Maven repository no longer outranks Google and Maven Central when
+  resolving the native SDK and Gradle plugins.
+
 ### Behavior changes against upstream 8.3.0
 
 * `BannerAd.load` now completes only after the native side accepts the request,

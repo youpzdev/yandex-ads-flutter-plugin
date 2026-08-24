@@ -9,6 +9,8 @@
  * Added in this local fork.
  */
 
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yandex_mobileads/mobile_ads.dart';
@@ -396,6 +398,138 @@ void main() {
 
     expect(pool.availableCount, 0,
         reason: 'the ad was requested under the previous answer');
+  });
+
+  test('an ad that answers after a timeout is released, not leaked', () async {
+    final harness = PoolHarness();
+    addTearDown(harness.dispose);
+    harness.install();
+
+    final loader = InterstitialAdLoader();
+    addTearDown(loader.destroy);
+
+    final events = <AdEvent>[];
+    final subscription = YandexAds.events.listen(events.add);
+    addTearDown(subscription.cancel);
+
+    await expectLater(
+      loader.loadAd(
+        adRequest: const AdRequest(adUnitId: 'unit'),
+        timeout: const Duration(milliseconds: 20),
+      ),
+      throwsA(isA<TimeoutException>()),
+    );
+
+    // The native side answers after nobody is waiting any more.
+    harness.completeLoaded();
+    await settle();
+
+    expect(harness.destroyedAds, contains(harness.lastAdId),
+        reason: 'an orphan ad must be released on the native side');
+    expect(
+      events.where((event) => event.type == AdEventType.loaded),
+      isEmpty,
+      reason: 'a load nobody received is not a load',
+    );
+  });
+
+  test('an ad loaded across a consent change is dropped', () async {
+    final harness = PoolHarness();
+    addTearDown(harness.dispose);
+    harness.install();
+
+    const consentChannel = MethodChannel('yandex_mobileads.mobileAds');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(consentChannel, (call) async => null);
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(consentChannel, null);
+    });
+
+    final pool = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+    );
+    addTearDown(pool.destroy);
+
+    await pool.start();
+    await harness.waitForLoads(1);
+
+    // The user answers the consent prompt while the request is in flight.
+    await YandexAds.setUserConsent(false);
+    harness.completeLoaded();
+    await settle();
+
+    expect(pool.availableCount, 0,
+        reason: 'the request was sent under the previous answer');
+    expect(harness.destroyedAds, contains(harness.lastAdId));
+  });
+
+  test('two pools cannot both claim the screen', () async {
+    final first = PoolHarness();
+    addTearDown(first.dispose);
+    first.install();
+
+    final poolA = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+    );
+    final poolB = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+    );
+    addTearDown(poolA.destroy);
+    addTearDown(poolB.destroy);
+
+    await poolA.start();
+    await first.waitForLoads(1);
+    first.completeLoaded();
+    await poolB.start();
+    await first.waitForLoads(2);
+    first.completeLoaded();
+    await settle();
+
+    final showA = poolA.showNext();
+    final showB = poolB.showNext();
+
+    final outcomeB = await showB;
+    expect(outcomeB.status, AdShowStatus.alreadyShowing,
+        reason: 'the second pool must not stack another ad on the screen');
+
+    await first.waitForShow();
+    first.emitAdEvent({'name': 'onAdShown'});
+    first.emitAdEvent({'name': 'onAdDismissed'});
+    expect((await showA).isShown, isTrue);
+    expect(first.showCalls, 1);
+  });
+
+  test('a repeated reward callback grants the reward once', () async {
+    final harness = PoolHarness(
+      loaderType: 'rewardedAdLoader',
+      adPath: 'rewardedAd',
+    );
+    addTearDown(harness.dispose);
+    harness.install();
+
+    final pool = FullscreenAdPool.rewarded(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+    );
+    addTearDown(pool.destroy);
+
+    await pool.start();
+    await harness.waitForLoads(1);
+    harness.completeLoaded();
+    await settle();
+
+    var rewards = 0;
+    final showing = pool.showNext(onRewarded: (_) => rewards++);
+    await harness.waitForShow();
+    harness.emitAdEvent({'name': 'onAdShown'});
+    harness.emitAdEvent({'name': 'onRewarded', 'type': 'coins', 'amount': 10});
+    harness.emitAdEvent({'name': 'onRewarded', 'type': 'coins', 'amount': 10});
+    harness.emitAdEvent({'name': 'onAdDismissed'});
+
+    final outcome = await showing;
+
+    expect(rewards, 1);
+    expect(outcome.reward?.amount, 10);
   });
 
   test('showNext reports that nothing was ready', () async {

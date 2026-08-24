@@ -35,6 +35,7 @@ class _FullScreenAdEventListener {
   StreamSubscription<Map<dynamic, dynamic>>? _subscription;
   final Completer<Map<dynamic, dynamic>> _terminalEvent = Completer();
   Reward? reward;
+  bool _rewardGranted = false;
 
   _FullScreenAdEventListener({
     required this.channelName,
@@ -85,6 +86,10 @@ class _FullScreenAdEventListener {
             onAdImpression?.call(impressionData);
             break;
           case _FullScreenAdCallbackName.onRewarded:
+            // One view grants one reward. A client callback is not proof of
+            // anything anyway: verify valuable rewards on your own server.
+            if (_rewardGranted) break;
+            _rewardGranted = true;
             reward = Reward._(result['type'], result['amount']);
             _emit(AdEventType.rewarded, reward: reward);
             onRewarded?.call(reward!);

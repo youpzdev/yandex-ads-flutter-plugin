@@ -22,6 +22,16 @@ class _AdActivity {
 
   static bool get isShowing => _visibleCount > 0;
 
+  /// Claims the screen for one full-screen ad, or refuses.
+  ///
+  /// Claiming happens before the first await, so two pools — or two calls on
+  /// one pool — cannot both pass the check and then both show.
+  static bool tryBegin() {
+    if (_visibleCount > 0) return false;
+    _visibleCount++;
+    return true;
+  }
+
   static DateTime? get lastShowEndedAt => _endedAt;
 
   /// How many ads of any format were clicked in this process.
@@ -32,11 +42,9 @@ class _AdActivity {
 
   static void noteClick() => _clickCount++;
 
-  static void begin() => _visibleCount++;
-
-  static void end() {
+  static void end({bool shown = true}) {
     if (_visibleCount > 0) _visibleCount--;
-    _endedAt = DateTime.now();
+    if (shown) _endedAt = DateTime.now();
   }
 }
 
@@ -238,7 +246,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
 
   Timer? _retryTimer;
   Timer? _expiryTimer;
-  bool _showInFlight = false;
   bool _retryPending = false;
   bool _observing = false;
   bool _started = false;
@@ -527,11 +534,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     void Function(Reward reward)? onRewarded,
   }) async {
     _ensureAlive();
-    // Two placements must never race into two ads in a row, and the cap has to
-    // be reserved before the first await, not when the platform reports back.
-    if (_showInFlight || _AdActivity.isShowing) {
-      return const AdShowOutcome._(AdShowStatus.alreadyShowing);
-    }
     final gate = frequencyGate;
     if (gate != null) {
       final decision = gate.evaluate(ignoreStartupGrace: ignoreStartupGrace);
@@ -540,11 +542,16 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
       }
     }
 
-    _showInFlight = true;
+    // The screen is claimed here, synchronously, so no other pool and no
+    // second call can slip between this check and the actual show.
+    if (!_AdActivity.tryBegin()) {
+      return const AdShowOutcome._(AdShowStatus.alreadyShowing);
+    }
     final reservation = _clock();
     gate?.recordShow(reservation);
+    var shown = false;
     try {
-      return await _showReserved(
+      final outcome = await _showReserved(
         gate: gate,
         reservation: reservation,
         waitFor: waitFor,
@@ -554,8 +561,10 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
         onAdDismissed: onAdDismissed,
         onRewarded: onRewarded,
       );
+      shown = outcome.isShown;
+      return outcome;
     } finally {
-      _showInFlight = false;
+      _AdActivity.end(shown: shown);
     }
   }
 
@@ -596,7 +605,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
         ),
       );
 
-      _AdActivity.begin();
       onScreen.start();
       await fullscreen.show();
       final dismissed = await fullscreen.waitForDismiss().timeout(
@@ -613,7 +621,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     } finally {
       onScreen.stop();
       gate?.noteShowDuration(onScreen.elapsed);
-      _AdActivity.end();
       // Releasing a shown ad must never replace its outcome with an error.
       try {
         await fullscreen.destroy();
@@ -735,12 +742,21 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     try {
       while (!_destroyed && _slots.length < capacity) {
         try {
+          // The answer this request gets belongs to the consent it was sent
+          // with, not to the one that happens to be current when it arrives.
+          final requestedConsent = _AdConsent.generation;
           final ad = await _load(loadTimeout);
           if (_destroyed) {
             await ad.destroy();
             return;
           }
-          _slots.add(_PoolSlot(ad, _clock(), _AdConsent.generation));
+          if (requestedConsent != _AdConsent.generation) {
+            try {
+              await ad.destroy();
+            } catch (_) {}
+            continue;
+          }
+          _slots.add(_PoolSlot(ad, _clock(), requestedConsent));
           _consecutiveFailures = 0;
           _lastError = null;
           _releaseWaiters();
