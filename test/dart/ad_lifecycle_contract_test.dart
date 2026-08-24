@@ -10,12 +10,14 @@
  */
 
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yandex_mobileads/mobile_ads.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  debugDefaultTargetPlatformOverride = TargetPlatform.android;
 
   test('initialization can retry after a platform failure', () async {
     var calls = 0;
@@ -137,6 +139,47 @@ void main() {
     await ad.setAdEventListener(eventListener: InterstitialAdEventListener());
     await ad.destroy();
     await loader.destroy();
+  });
+
+  test('native ad load fails instead of hanging without a platform view',
+      () async {
+    final ad = NativeAd(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+      width: 324,
+      height: 364,
+      loadTimeout: const Duration(milliseconds: 20),
+    );
+    Object? outcome;
+    unawaited(
+      ad.load().then((_) => outcome = 'completed', onError: (Object e) {
+        outcome = e;
+      }),
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+
+    expect(outcome, isA<TimeoutException>());
+  });
+
+  test('banner load fails instead of hanging without a displayed widget',
+      () async {
+    final banner = BannerAd(adSize: const BannerAdSize.sticky(width: 320));
+    Object? outcome;
+    unawaited(
+      banner
+          .load(
+        const AdRequest(adUnitId: 'unit'),
+        timeout: const Duration(milliseconds: 20),
+      )
+          .then((_) => outcome = 'completed', onError: (Object e) {
+        outcome = e;
+      }),
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+
+    expect(outcome, isA<TimeoutException>());
+    expect(banner.loadState, isA<BannerAdLoadStateError>());
   });
 
   test('native templates expose safe minimum sizes and style presets', () {

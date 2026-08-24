@@ -23,6 +23,10 @@ class _BannerAdEventListener {
   });
 
   void setupCallbacks() {
+    final previous = _subscription;
+    if (previous != null) {
+      unawaited(previous.cancel());
+    }
     final stream = EventChannel(channelName).receiveBroadcastStream();
     _subscription = stream.listen((result) {
       final map = result as Map;

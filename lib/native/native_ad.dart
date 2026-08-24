@@ -90,7 +90,10 @@ class NativeAd with _Ad {
     _loadStarted = true;
     _loadTimer = Timer(loadTimeout, () => unawaited(_cancelTimedOutLoad()));
     try {
-      await _platformViewReady.future;
+      await Future.any<void>([
+        _platformViewReady.future,
+        _loadedCompleter.future,
+      ]);
       if (_loadFinished) {
         await _loadedCompleter.future;
         return;
@@ -118,6 +121,10 @@ class NativeAd with _Ad {
   }
 
   void _listenToEvents() {
+    final previous = _eventSubscription;
+    if (previous != null) {
+      unawaited(previous.cancel());
+    }
     _eventSubscription = EventChannel('$methodChannelName.events')
         .receiveBroadcastStream()
         .listen(

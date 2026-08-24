@@ -70,14 +70,25 @@ class BannerAd with _Ad {
   /// Can be called multiple times to reload. Emits [BannerAdLoadStateLoading]
   /// immediately, then [BannerAdLoadStateLoaded] or [BannerAdLoadStateError]
   /// when the native side responds.
-  Future<void> load(AdRequest adRequest) async {
+  ///
+  /// The returned future completes once the native side has accepted the
+  /// request, which requires the matching [AdWidget] to be in the widget tree.
+  /// If the widget never appears, the load fails with a [TimeoutException]
+  /// after [timeout] instead of waiting forever.
+  Future<void> load(
+    AdRequest adRequest, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
     ensureAlive();
+    if (timeout <= Duration.zero) {
+      throw ArgumentError.value(timeout, 'timeout', 'Must be positive.');
+    }
     if (_loadFuture != null) {
       throw StateError('Another banner ad load is already in progress.');
     }
 
     late final Future<void> load;
-    load = _load(adRequest);
+    load = _load(adRequest, timeout);
     _loadFuture = load;
     try {
       await load;
@@ -88,7 +99,7 @@ class BannerAd with _Ad {
     }
   }
 
-  Future<void> _load(AdRequest adRequest) async {
+  Future<void> _load(AdRequest adRequest, Duration timeout) async {
     await (YandexAds._initFuture ?? Future<void>.value());
     ensureAlive();
 
@@ -109,7 +120,23 @@ class BannerAd with _Ad {
         },
       );
     }
-    await _platformViewCreated.future;
+    await _platformViewCreated.future.timeout(
+      timeout,
+      onTimeout: () {
+        final error = AdRequestError(
+          -1,
+          'Banner ad load timed out before its widget was displayed.',
+          adRequest.adUnitId,
+        );
+        if (!_loadStateController.isClosed) {
+          _loadStateController.add(BannerAdLoadStateError(error: error));
+        }
+        throw TimeoutException(
+          'Banner ad load timed out before its widget was displayed.',
+          timeout,
+        );
+      },
+    );
     ensureAlive();
     await _invokeLoad(adRequest);
   }
