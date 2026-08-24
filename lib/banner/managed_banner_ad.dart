@@ -70,6 +70,7 @@ class ManagedBannerAdController extends ChangeNotifier {
   StreamSubscription<BannerAdLoadState>? _loadSubscription;
   Timer? _refreshTimer;
   Timer? _loadWatchdog;
+  Future<void>? _pendingLoad;
   DateTime? _visibleSince;
   late Duration _remaining;
   bool _visible = false;
@@ -206,15 +207,23 @@ class ManagedBannerAdController extends ChangeNotifier {
   Future<void> _requestLoad() async {
     final banner = _bannerAd;
     if (_destroyed || !_visible || _loading || banner == null) return;
+    if (_pendingLoad != null) return;
     _loading = true;
     _loadAttempted = true;
     notifyListeners();
+    late final Future<void> request;
+    request = banner.load(adRequest, timeout: loadTimeout);
+    _pendingLoad = request;
     try {
-      await banner.load(adRequest, timeout: loadTimeout);
+      await request;
       _startLoadWatchdog();
     } catch (_) {
       if (_destroyed) return;
       _failCurrentLoad();
+    } finally {
+      if (identical(_pendingLoad, request)) {
+        _pendingLoad = null;
+      }
     }
   }
 
@@ -303,6 +312,12 @@ class _ManagedBannerAdWidgetState extends State<ManagedBannerAdWidget>
   void didUpdateWidget(ManagedBannerAdWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
+      if (widget.controller.isDestroyed) {
+        throw StateError(
+          'ManagedBannerAdWidget was given a destroyed controller. '
+          'Create a new controller for a new placement.',
+        );
+      }
       oldWidget.controller.setVisible(false);
       unawaited(widget.controller.start());
     }

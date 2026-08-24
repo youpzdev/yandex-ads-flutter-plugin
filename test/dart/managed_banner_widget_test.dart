@@ -9,6 +9,8 @@
  * Added in this local fork.
  */
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -92,16 +94,19 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: ListView(
-          children: [
-            const SizedBox(height: 4000),
-            ManagedBannerAdWidget(controller: controller),
-          ],
+        home: SingleChildScrollView(
+          child: Column(
+            children: [
+              const SizedBox(height: 4000),
+              ManagedBannerAdWidget(controller: controller),
+            ],
+          ),
         ),
       ),
     );
     await tester.pump();
 
+    expect(find.byType(ManagedBannerAdWidget), findsOneWidget);
     expect(controller.isLoading, isFalse);
 
     await tester.runAsync(controller.destroy);
@@ -126,10 +131,75 @@ void main() {
 
     expect(find.byType(AndroidView), findsOneWidget);
 
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    for (var id = 0; id < _mockedBannerIds; id++) {
+      messenger.setMockMethodCallHandler(
+        MethodChannel('yandex_mobileads.bannerAd.$id'),
+        null,
+      );
+    }
+
     await tester.runAsync(() async {
       await loading;
       await banner.destroy();
     });
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('a recreated native ad view requests the ad again',
+      (tester) async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var loadCalls = 0;
+    for (var id = 0; id < _mockedBannerIds; id++) {
+      messenger.setMockMethodCallHandler(
+        MethodChannel('yandex_mobileads.nativeAd.$id'),
+        (call) async {
+          if (call.method == 'load') loadCalls++;
+          return null;
+        },
+      );
+      messenger.setMockStreamHandler(
+        EventChannel('yandex_mobileads.nativeAd.$id.events'),
+        const MockStreamHandler.inline(onListen: _ignoreListen),
+      );
+    }
+    addTearDown(() {
+      for (var id = 0; id < _mockedBannerIds; id++) {
+        messenger.setMockMethodCallHandler(
+          MethodChannel('yandex_mobileads.nativeAd.$id'),
+          null,
+        );
+        messenger.setMockStreamHandler(
+          EventChannel('yandex_mobileads.nativeAd.$id.events'),
+          null,
+        );
+      }
+    });
+
+    final ad = NativeAd(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+      width: 324,
+      height: 432,
+      loadTimeout: const Duration(seconds: 120),
+    );
+
+    await tester.pumpWidget(MaterialApp(home: NativeAdWidget(nativeAd: ad)));
+    final loading = ad.load();
+    await tester.pump();
+    await tester.pump();
+
+    expect(loadCalls, 1);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pumpWidget(MaterialApp(home: NativeAdWidget(nativeAd: ad)));
+    await tester.pump();
+    await tester.pump(NativeAd.reloadInterval + const Duration(seconds: 1));
+
+    expect(loadCalls, 2);
+    unawaited(loading.catchError((Object _) {}));
+    await tester.runAsync(ad.destroy);
     debugDefaultTargetPlatformOverride = null;
   });
 

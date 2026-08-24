@@ -23,6 +23,9 @@ class NativeAd with _Ad {
   final Duration loadTimeout;
   final int _id = _idCount++;
 
+  /// Shortest gap between two requests this ad makes on its own.
+  static const reloadInterval = Duration(seconds: 30);
+
   final _loadStateController = StreamController<NativeAdLoadState>.broadcast();
   final _eventsController = StreamController<NativeAdEvent>.broadcast();
   final _loadedCompleter = Completer<void>();
@@ -31,11 +34,12 @@ class NativeAd with _Ad {
   late final Widget _widget;
   StreamSubscription<dynamic>? _eventSubscription;
   Timer? _loadTimer;
+  Timer? _reloadTimer;
+  DateTime? _lastRequestAt;
   bool _platformViewCreated = false;
   bool _loadStarted = false;
-  bool _loadFinished = false;
+  bool _cycleFinished = false;
   bool _nativeLoadInvoked = false;
-  bool _loadSucceeded = false;
   bool _cancelWhenPlatformViewReady = false;
   Map<String, dynamic>? _nativeLoadArguments;
   Future<void>? _nativeDestroyFuture;
@@ -80,8 +84,8 @@ class NativeAd with _Ad {
           unawaited(_cancelNativeLoad());
           return;
         }
-        if (recreated && _nativeLoadInvoked && !_loadFinished) {
-          unawaited(_resendNativeLoad());
+        if (recreated && _nativeLoadInvoked) {
+          _scheduleReload();
         }
       },
     );
@@ -108,17 +112,16 @@ class NativeAd with _Ad {
         _platformViewReady.future,
         _loadedCompleter.future,
       ]);
-      if (_loadFinished) {
+      if (_cycleFinished) {
         await _loadedCompleter.future;
         return;
       }
       ensureAlive();
       await (YandexAds._initFuture ?? Future<void>.value());
-      if (_loadFinished) {
+      if (_cycleFinished) {
         await _loadedCompleter.future;
         return;
       }
-      _loadStateController.add(NativeAdLoadStateLoading());
       final map = adRequest._toMap();
       map['adUnitId'] = adRequest.adUnitId;
       map['parameters'] = {
@@ -126,8 +129,7 @@ class NativeAd with _Ad {
         'plugin_version': YandexAds.pluginVersion,
       }..addAll(adRequest.parameters ?? {});
       _nativeLoadArguments = map;
-      _nativeLoadInvoked = true;
-      await _channel.invokeMethod<void>('load', map);
+      await _sendNativeLoad(map);
       await _loadedCompleter.future;
     } catch (error, stackTrace) {
       _completeLoadError(error, stackTrace);
@@ -135,15 +137,43 @@ class NativeAd with _Ad {
     }
   }
 
-  /// Repeats the request when the platform view is recreated mid-load.
+  Future<void> _sendNativeLoad(Map<String, dynamic> arguments) async {
+    _lastRequestAt = DateTime.now();
+    _nativeLoadInvoked = true;
+    _cycleFinished = false;
+    _loadTimer?.cancel();
+    _loadTimer = Timer(loadTimeout, () => unawaited(_cancelTimedOutLoad()));
+    if (!_loadStateController.isClosed) {
+      _loadStateController.add(NativeAdLoadStateLoading());
+    }
+    await _channel.invokeMethod<void>('load', arguments);
+  }
+
+  /// Requests the ad again for a recreated platform view.
   ///
-  /// A recreated view is a fresh native instance: the interrupted request
-  /// belonged to the previous one and would never report back.
-  Future<void> _resendNativeLoad() async {
+  /// A recreated view is a fresh native instance holding no ad, so whatever
+  /// the previous view loaded is gone. Requests are spaced by
+  /// [reloadInterval] so that scrolling a placement in and out cannot turn
+  /// into a burst of ad requests.
+  void _scheduleReload() {
+    if (isDestroyed || _nativeLoadArguments == null) return;
+    _reloadTimer?.cancel();
+    final lastRequestAt = _lastRequestAt;
+    final waited =
+        lastRequestAt == null ? reloadInterval : DateTime.now().difference(lastRequestAt);
+    final remaining = reloadInterval - waited;
+    if (remaining <= Duration.zero) {
+      unawaited(_reload());
+      return;
+    }
+    _reloadTimer = Timer(remaining, () => unawaited(_reload()));
+  }
+
+  Future<void> _reload() async {
     final arguments = _nativeLoadArguments;
-    if (arguments == null || isDestroyed || _loadFinished) return;
+    if (arguments == null || isDestroyed || !_platformViewCreated) return;
     try {
-      await _channel.invokeMethod<void>('load', arguments);
+      await _sendNativeLoad(arguments);
     } catch (error, stackTrace) {
       _completeLoadError(error, stackTrace);
     }
@@ -161,7 +191,8 @@ class NativeAd with _Ad {
         final map = Map<dynamic, dynamic>.from(event as Map);
         switch (map['name']) {
           case 'onAdLoaded':
-            if (_loadFinished && !_loadSucceeded) return;
+            if (_cycleFinished) return;
+            _cycleFinished = true;
             _loadTimer?.cancel();
             if (!_loadStateController.isClosed) {
               _loadStateController.add(
@@ -174,7 +205,7 @@ class NativeAd with _Ad {
             _completeLoadSuccess();
             break;
           case 'onAdFailedToLoad':
-            if (_loadFinished) return;
+            if (_cycleFinished) return;
             _loadTimer?.cancel();
             final error = AdRequestError(
               (map['code'] as num?)?.toInt() ?? -1,
@@ -204,9 +235,7 @@ class NativeAd with _Ad {
   }
 
   void _completeLoadSuccess() {
-    if (_loadFinished) return;
-    _loadFinished = true;
-    _loadSucceeded = true;
+    _cycleFinished = true;
     _loadTimer?.cancel();
     if (!_loadedCompleter.isCompleted) {
       _loadedCompleter.complete();
@@ -232,7 +261,10 @@ class NativeAd with _Ad {
   Future<void> _destroyLateView() async {
     try {
       await _channel.invokeMethod<void>('destroy');
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _finalizer.detach(this);
+    }
   }
 
   Future<void> _cancelNativeLoad() async {
@@ -242,8 +274,8 @@ class NativeAd with _Ad {
   }
 
   bool _markLoadFinished() {
-    if (_loadFinished) return false;
-    _loadFinished = true;
+    if (_cycleFinished) return false;
+    _cycleFinished = true;
     _loadTimer?.cancel();
     return true;
   }
@@ -270,6 +302,7 @@ class NativeAd with _Ad {
 
   Future<void> _destroyNativeAd() async {
     _loadTimer?.cancel();
+    _reloadTimer?.cancel();
     await _eventSubscription?.cancel();
     if (!_platformViewReady.isCompleted && _loadStarted) {
       _platformViewReady.completeError(

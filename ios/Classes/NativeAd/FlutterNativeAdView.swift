@@ -29,9 +29,6 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
     private var isLoadPending = false
     private var pendingAdUnitID = ""
 
-    /// Called with the loaded ad, or with nil when it is released.
-    var onAdReady: (((any NativeAd)?) -> Void)?
-
     /// Called once the view gave up its method and event channels.
     var onDisposed: (() -> Void)?
 
@@ -93,13 +90,6 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         eventRelay.send(name: "onImpression", values: ["impressionData": impressionData?.rawData])
     }
 
-    /// Rebinds an ad that outlived its previous platform view.
-    func bindCachedAd(_ ad: any NativeAd) {
-        guard !isDestroyed else { return }
-        requestSequence &+= 1
-        bind(ad: ad, adUnitID: "", cached: true)
-    }
-
     private func load(requestValues: [String: Any?]) {
         requestSequence &+= 1
         let sequence = requestSequence
@@ -121,7 +111,7 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
             guard let self, !self.isDestroyed, self.requestSequence == sequence else { return }
             switch loadResult {
             case .success(let ad):
-                self.bind(ad: ad, adUnitID: request.adUnitID, cached: false)
+                self.bind(ad: ad, adUnitID: request.adUnitID)
             case .failure(let error):
                 self.isLoadPending = false
                 self.sendLoadFailure(error: error, adUnitID: request.adUnitID)
@@ -129,7 +119,7 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         }
     }
 
-    private func bind(ad: any NativeAd, adUnitID: String, cached: Bool) {
+    private func bind(ad: any NativeAd, adUnitID: String) {
         ad.delegate = nativeAdDelegate
         do {
             try ad.bind(with: nativeAdView)
@@ -144,9 +134,6 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
             }
             isLoadPending = false
             nativeAd = ad
-            if !cached {
-                onAdReady?(ad)
-            }
             nativeAdView.isHidden = false
             eventRelay.send(
                 name: "onAdLoaded",
@@ -163,7 +150,6 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
     private func releaseLoadedAd() {
         nativeAd?.delegate = nil
         nativeAd = nil
-        onAdReady?(nil)
     }
 
     private func sendLoadFailure(error: Error, adUnitID: String, code: Int? = nil) {
@@ -226,7 +212,6 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         eventRelay.detach()
         onDisposed?()
         onDisposed = nil
-        onAdReady = nil
     }
 
     private static func requestValues(from arguments: Any?) -> [String: Any?]? {
@@ -295,8 +280,9 @@ private final class NativeAdEventRelay: NSObject, @preconcurrency FlutterStreamH
     }
 
     func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        // Queued events outlive a resubscription: the view may have already
+        // reported its outcome before Dart attached the new listener.
         sink = nil
-        clearPendingEvents()
         return nil
     }
 
@@ -359,7 +345,7 @@ struct NativeAdStyle {
         metadataColor = Self.color(values["metadataColor"])
         callToActionTextColor = Self.visibleColor(values["callToActionTextColor"])
         callToActionBackgroundColor = Self.visibleColor(values["callToActionBackgroundColor"])
-        cornerRadius = Self.dimension(values["cornerRadius"], maximum: 48)
+        cornerRadius = Self.dimension(values["cornerRadius"], maximum: 64)
         contentPadding = Self.dimension(values["contentPadding"], maximum: 64)
     }
 
@@ -498,7 +484,7 @@ private final class NativeAdTemplateView: NativeAdView {
         domain.font = .preferredFont(forTextStyle: .subheadline)
         domain.numberOfLines = 1
         warning.font = .preferredFont(forTextStyle: .caption2)
-        warning.numberOfLines = 0
+        warning.numberOfLines = 2
         sponsored.font = .preferredFont(forTextStyle: .caption1)
         sponsored.numberOfLines = 1
         price.font = .preferredFont(forTextStyle: .caption1)
@@ -545,8 +531,8 @@ private final class NativeAdTemplateView: NativeAdView {
         body.textColor = style.bodyColor ?? .label
         domain.textColor = style.metadataColor ?? .secondaryLabel
         price.textColor = style.metadataColor ?? .secondaryLabel
-        sponsored.textColor = .secondaryLabel
-        warning.textColor = .secondaryLabel
+        sponsored.textColor = style.metadataColor ?? .secondaryLabel
+        warning.textColor = style.metadataColor ?? .secondaryLabel
         let callToActionBackground = style.callToActionBackgroundColor ?? .systemBlue
         callToAction.backgroundColor = callToActionBackground
         callToAction.setTitleColor(

@@ -10,14 +10,12 @@
  */
 
 import Flutter
-import YandexMobileAds
 
 @MainActor
 final class NativeAdViewFactory: NSObject, FlutterPlatformViewFactory {
 
     private let messenger: FlutterBinaryMessenger
     private var viewGenerations: [Int: Int] = [:]
-    private var loadedAds: [Int: any NativeAd] = [:]
 
     init(messenger: FlutterBinaryMessenger) {
         self.messenger = messenger
@@ -50,28 +48,21 @@ final class NativeAdViewFactory: NSObject, FlutterPlatformViewFactory {
         let generation = (viewGenerations[id] ?? 0) + 1
         viewGenerations[id] = generation
 
-        nativeAdView.onAdReady = { [weak self] ad in
-            guard let self else { return }
-            if let ad {
-                self.loadedAds[id] = ad
-            } else {
-                self.loadedAds.removeValue(forKey: id)
-            }
-        }
-
-        nativeAdView.onDisposed = { [weak self] in
+        let releaseChannels = { [weak self] in
             guard let self, self.viewGenerations[id] == generation else { return }
             // A replacement platform view may already own these channel names.
             self.viewGenerations.removeValue(forKey: id)
-            self.loadedAds.removeValue(forKey: id)
             methodChannel.setMethodCallHandler(nil)
             eventChannel.setStreamHandler(nil)
         }
 
+        nativeAdView.onDisposed = releaseChannels
+
         methodChannel.setMethodCallHandler { [weak nativeAdView] call, result in
             Task { @MainActor in
                 guard let nativeAdView else {
-                    // A disposed view still has to answer teardown calls.
+                    // Flutter released the view without a Dart destroy: answer
+                    // teardown calls and give the channel names back.
                     if call.method == "load" {
                         result(FlutterError(
                             code: "disposed",
@@ -79,16 +70,13 @@ final class NativeAdViewFactory: NSObject, FlutterPlatformViewFactory {
                             details: nil
                         ))
                     } else {
+                        releaseChannels()
                         result(nil)
                     }
                     return
                 }
                 nativeAdView.handle(call: call, result: result)
             }
-        }
-
-        if let cachedAd = loadedAds[id] {
-            nativeAdView.bindCachedAd(cachedAd)
         }
 
         return nativeAdView

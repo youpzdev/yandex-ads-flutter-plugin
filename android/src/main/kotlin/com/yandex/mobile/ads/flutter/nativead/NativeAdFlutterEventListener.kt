@@ -62,7 +62,9 @@ internal class NativeAdFlutterEventListener(
     }
 
     override fun onCancel(arguments: Any?) {
-        clear()
+        // Queued events outlive a resubscription: the view may have already
+        // reported its outcome before Dart attached the new listener.
+        eventSink = null
     }
 
     fun clear() {

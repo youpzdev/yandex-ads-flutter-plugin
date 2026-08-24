@@ -87,9 +87,11 @@ A load timeout sends `cancelLoading` to native code and suppresses late
 callbacks.
 
 A native ad survives its platform view: when Flutter recreates the view (for
-example after scrolling far out of a list and back), the native layer rebinds
-the ad it already holds instead of requesting a new one, and a load that was
-interrupted mid-flight is re-sent.
+example after scrolling far out of a list and back), the ad is requested again
+for the new view, because the previous native view took its ad with it.
+Requests a `NativeAd` makes on its own are spaced by
+`NativeAd.reloadInterval` (30 seconds), so scrolling a placement in and out
+cannot turn into a burst of ad requests.
 
 ### Lifecycle behavior
 

@@ -52,7 +52,6 @@ internal class FlutterNativeAdView(
     private lateinit var contentView: LinearLayout
     private var eventListener: NativeAdFlutterEventListener? = null
     private var onDisposed: (() -> Unit)? = null
-    private var onAdReady: ((NativeAd?) -> Unit)? = null
     private var nativeAd: NativeAd? = null
     private var destroyed = false
     private var loadPending = false
@@ -75,18 +74,6 @@ internal class FlutterNativeAdView(
         onDisposed = callback
     }
 
-    fun setOnAdReady(callback: (NativeAd?) -> Unit) {
-        onAdReady = callback
-    }
-
-    fun bindCachedAd(cachedAd: NativeAd) {
-        runOnMain {
-            if (destroyed) return@runOnMain
-            val generation = ++loadGeneration
-            pendingAdUnitId = ""
-            applyLoadedAd(cachedAd, "", generation, cached = true)
-        }
-    }
 
     fun load(arguments: Any?, result: MethodChannel.Result) {
         val args = arguments as? Map<String, Any?>
@@ -119,7 +106,7 @@ internal class FlutterNativeAdView(
                                 return@runOnMain
                             }
                             if (generation != loadGeneration) return@runOnMain
-                            applyLoadedAd(loadedAd, adUnitId, generation, cached = false)
+                            applyLoadedAd(loadedAd, adUnitId, generation)
                         }
                     }
 
@@ -144,7 +131,7 @@ internal class FlutterNativeAdView(
     }
 
     fun destroy(onDestroyed: () -> Unit) {
-        teardown(releaseAd = true, onDone = onDestroyed)
+        teardown(onDone = onDestroyed)
     }
 
     fun cancelLoading(result: MethodChannel.Result) {
@@ -161,13 +148,13 @@ internal class FlutterNativeAdView(
     }
 
     override fun dispose() {
-        teardown(releaseAd = false) {
+        teardown {
             onDisposed?.invoke()
             onDisposed = null
         }
     }
 
-    private fun teardown(releaseAd: Boolean, onDone: () -> Unit) {
+    private fun teardown(onDone: () -> Unit) {
         runOnMain {
             if (!destroyed) {
                 destroyed = true
@@ -181,15 +168,9 @@ internal class FlutterNativeAdView(
                         pendingAdUnitId,
                     )
                 }
-                if (releaseAd) {
-                    releaseLoadedAd()
-                } else {
-                    nativeAd?.setNativeAdEventListener(null)
-                    nativeAd = null
-                }
+                releaseLoadedAd()
                 eventListener?.clear()
                 eventListener = null
-                onAdReady = null
                 hideNativeAd()
             }
             onDone()
@@ -199,14 +180,12 @@ internal class FlutterNativeAdView(
     private fun releaseLoadedAd() {
         nativeAd?.setNativeAdEventListener(null)
         nativeAd = null
-        onAdReady?.invoke(null)
     }
 
     private fun applyLoadedAd(
         loadedAd: NativeAd,
         adUnitId: String,
         generation: Long,
-        cached: Boolean,
     ) {
         nativeAd?.setNativeAdEventListener(null)
         try {
@@ -238,9 +217,6 @@ internal class FlutterNativeAdView(
             }
             loadPending = false
             nativeAd = loadedAd
-            if (!cached) {
-                onAdReady?.invoke(loadedAd)
-            }
             eventListener?.let(loadedAd::setNativeAdEventListener)
             nativeAdView.visibility = View.VISIBLE
             eventListener?.onAdLoaded()
