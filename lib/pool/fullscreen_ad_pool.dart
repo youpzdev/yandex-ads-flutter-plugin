@@ -132,7 +132,22 @@ class AdShowOutcome {
   /// Set when a rewarded ad granted a reward.
   final Reward? reward;
 
-  const AdShowOutcome._(this.status, {this.frequency, this.error, this.reward});
+  /// How long the ad held the screen, from show to dismissal.
+  ///
+  /// The plugin cannot change how an ad is closed — the close button, its
+  /// countdown and the sound control belong to the Yandex Mobile Ads SDK and
+  /// to the creative. What it can do is measure the cost: a placement whose
+  /// ads run for half a minute deserves a longer gap than one that closes in
+  /// three seconds.
+  final Duration? duration;
+
+  const AdShowOutcome._(
+    this.status, {
+    this.frequency,
+    this.error,
+    this.reward,
+    this.duration,
+  });
 
   bool get isShown => status == AdShowStatus.shown;
 
@@ -563,6 +578,7 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     final fullscreen = ad as _FullscreenAd;
     Reward? reward;
     AdError? failure;
+    final onScreen = Stopwatch();
 
     try {
       await _listen(
@@ -581,6 +597,7 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
       );
 
       _AdActivity.begin();
+      onScreen.start();
       await fullscreen.show();
       final dismissed = await fullscreen.waitForDismiss().timeout(
             showTimeout,
@@ -594,6 +611,8 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     } catch (error) {
       failure ??= AdError(error.toString());
     } finally {
+      onScreen.stop();
+      gate?.noteShowDuration(onScreen.elapsed);
       _AdActivity.end();
       // Releasing a shown ad must never replace its outcome with an error.
       try {
@@ -605,9 +624,17 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     final error = failure;
     if (error != null) {
       gate?._undoShow(reservation);
-      return AdShowOutcome._(AdShowStatus.failed, error: error);
+      return AdShowOutcome._(
+        AdShowStatus.failed,
+        error: error,
+        duration: onScreen.elapsed,
+      );
     }
-    return AdShowOutcome._(AdShowStatus.shown, reward: reward);
+    return AdShowOutcome._(
+      AdShowStatus.shown,
+      reward: reward,
+      duration: onScreen.elapsed,
+    );
   }
 
   /// Releases every held ad and stops loading.

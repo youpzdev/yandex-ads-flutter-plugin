@@ -214,6 +214,56 @@ void main() {
       expect(restored.evaluate().block, AdFrequencyBlock.dailyCap);
     });
 
+    test('a long ad earns a longer gap after it', () {
+      final gate = AdFrequencyGate(
+        policy: const AdFrequencyPolicy(
+          startupGrace: Duration.zero,
+          minimumInterval: Duration(seconds: 30),
+          maximumPerHour: null,
+          maximumPerDay: null,
+          durationPenalty: 2,
+        ),
+        clock: clock,
+      );
+
+      gate.noteShowDuration(const Duration(seconds: 30));
+      gate.recordShow();
+
+      expect(gate.effectiveMinimumInterval, const Duration(seconds: 90));
+      now = now.add(const Duration(seconds: 45));
+      final blocked = gate.evaluate();
+      expect(blocked.block, AdFrequencyBlock.minimumInterval);
+      expect(blocked.retryAfter, const Duration(seconds: 45));
+
+      now = now.add(const Duration(seconds: 46));
+      expect(gate.isAllowed, isTrue);
+
+      // A creative that closes at once barely moves the next show.
+      gate.noteShowDuration(const Duration(seconds: 2));
+      gate.recordShow();
+      expect(gate.effectiveMinimumInterval, const Duration(seconds: 34));
+    });
+
+    test('the duration penalty can be switched off', () {
+      final gate = AdFrequencyGate(
+        policy: const AdFrequencyPolicy(
+          startupGrace: Duration.zero,
+          minimumInterval: Duration(seconds: 30),
+          maximumPerHour: null,
+          maximumPerDay: null,
+          durationPenalty: 0,
+        ),
+        clock: clock,
+      );
+
+      gate.noteShowDuration(const Duration(minutes: 5));
+      expect(gate.effectiveMinimumInterval, const Duration(seconds: 30));
+      expect(
+        () => const AdFrequencyPolicy(durationPenalty: -1).validate(),
+        throwsArgumentError,
+      );
+    });
+
     test('presets stay inside safe bounds', () {
       expect(
         AdFrequencyPolicy.conservative.minimumInterval,

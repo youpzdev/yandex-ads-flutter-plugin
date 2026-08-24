@@ -76,6 +76,7 @@ class AdFrequencyPolicy {
     maximumPerHour: 3,
     maximumPerDay: 10,
     startupGrace: Duration(minutes: 1),
+    durationPenalty: 3,
   );
 
   /// Denser shows for sessions built around short loops.
@@ -92,6 +93,7 @@ class AdFrequencyPolicy {
     startupGrace: Duration.zero,
     maximumPerHour: null,
     maximumPerDay: null,
+    durationPenalty: 0,
   );
 
   /// Shortest gap between two shows.
@@ -109,12 +111,22 @@ class AdFrequencyPolicy {
   /// Shows allowed within one session.
   final int? maximumPerSession;
 
+  /// How much the length of the previous ad extends the gap after it.
+  ///
+  /// The plugin cannot shorten an ad or change how it is closed: the close
+  /// button and its countdown belong to the ad SDK and the creative. It can
+  /// make an expensive show cost more silence — with the default factor of 2,
+  /// a 30 second ad pushes the next one 60 seconds further away, while a
+  /// creative that closes in 3 seconds barely moves it. Set 0 to disable.
+  final double durationPenalty;
+
   const AdFrequencyPolicy({
     this.minimumInterval = const Duration(minutes: 3),
     this.startupGrace = const Duration(seconds: 30),
     this.maximumPerHour = 6,
     this.maximumPerDay = 20,
     this.maximumPerSession,
+    this.durationPenalty = 2,
   });
 
   void validate() {
@@ -125,6 +137,10 @@ class AdFrequencyPolicy {
     if (startupGrace < Duration.zero) {
       throw ArgumentError.value(
           startupGrace, 'startupGrace', 'Must not be negative.');
+    }
+    if (durationPenalty < 0 || !durationPenalty.isFinite) {
+      throw ArgumentError.value(
+          durationPenalty, 'durationPenalty', 'Must not be negative.');
     }
     for (final entry in {
       'maximumPerHour': maximumPerHour,
@@ -153,6 +169,7 @@ class AdFrequencyGate {
   final List<DateTime> _shows;
   late final DateTime _sessionStart;
   int _sessionShows = 0;
+  Duration _lastShowDuration = Duration.zero;
 
   AdFrequencyGate({
     this.policy = AdFrequencyPolicy.standard,
@@ -175,6 +192,28 @@ class AdFrequencyGate {
 
   /// Shows recorded since this gate was created.
   int get sessionShowCount => _sessionShows;
+
+  /// How long the previous ad held the screen.
+  Duration get lastShowDuration => _lastShowDuration;
+
+  /// The gap required after the previous show, penalty included.
+  Duration get effectiveMinimumInterval {
+    final penalty = policy.durationPenalty;
+    if (penalty <= 0 || _lastShowDuration <= Duration.zero) {
+      return policy.minimumInterval;
+    }
+    final extra = Duration(
+      microseconds: (_lastShowDuration.inMicroseconds * penalty).round(),
+    );
+    return policy.minimumInterval + extra;
+  }
+
+  /// Records how long the ad that was just shown held the screen.
+  ///
+  /// A long ad costs the user more, so it earns a longer gap after it.
+  void noteShowDuration(Duration duration) {
+    _lastShowDuration = duration.isNegative ? Duration.zero : duration;
+  }
 
   /// Whether a show is allowed right now.
   bool get isAllowed => evaluate().isAllowed;
@@ -202,11 +241,12 @@ class AdFrequencyGate {
     }
 
     if (_shows.isNotEmpty) {
+      final required = effectiveMinimumInterval;
       final sinceLast = now.difference(_shows.last);
-      if (sinceLast < policy.minimumInterval) {
+      if (sinceLast < required) {
         return AdFrequencyDecision.blocked(
           AdFrequencyBlock.minimumInterval,
-          policy.minimumInterval - sinceLast,
+          required - sinceLast,
         );
       }
     }
