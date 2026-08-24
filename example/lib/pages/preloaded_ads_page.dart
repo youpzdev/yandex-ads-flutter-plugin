@@ -89,6 +89,8 @@ class _PreloadedAdsPageState extends State<PreloadedAdsPage> {
             : 'Blocked by $reason, try again in ${wait.inSeconds} s.';
       case AdShowStatus.unavailable:
         return 'No ad was ready in time.';
+      case AdShowStatus.alreadyShowing:
+        return 'Another full-screen ad is on screen right now.';
       case AdShowStatus.failed:
         return 'The ad could not be displayed: ${outcome.error?.description}';
     }

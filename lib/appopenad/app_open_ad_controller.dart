@@ -35,11 +35,11 @@ class AppOpenAdController with WidgetsBindingObserver {
   final bool showOnColdStart;
 
   final FullscreenAdPool<AppOpenAd> _pool;
-  final AdFrequencyGate _gate;
   final DateTime Function() _clock;
   final _shows = StreamController<AdShowOutcome>.broadcast();
 
   DateTime? _backgroundedAt;
+  int _clicksAtResume = 0;
   bool _suppressNextResume = false;
   bool _started = false;
   bool _destroyed = false;
@@ -58,13 +58,13 @@ class AppOpenAdController with WidgetsBindingObserver {
     AdFrequencyGate? frequencyGate,
     DateTime Function()? clock,
   })  : _clock = clock ?? DateTime.now,
-        _gate = frequencyGate ??
-            AdFrequencyGate(policy: frequencyPolicy, clock: clock),
         _pool = FullscreenAdPool.appOpen(
           adRequest: adRequest,
           timeToLive: timeToLive,
           loadTimeout: loadTimeout,
           retryPolicy: retryPolicy,
+          frequencyGate: frequencyGate ??
+              AdFrequencyGate(policy: frequencyPolicy, clock: clock),
           clock: clock,
         ) {
     if (minimumBackgroundDuration < Duration.zero) {
@@ -86,7 +86,7 @@ class AppOpenAdController with WidgetsBindingObserver {
   FullscreenAdPool<AppOpenAd> get pool => _pool;
 
   /// Pacing state shared by every show this controller makes.
-  AdFrequencyGate get frequencyGate => _gate;
+  AdFrequencyGate get frequencyGate => _pool.frequencyGate!;
 
   bool get isDestroyed => _destroyed;
 
@@ -97,10 +97,16 @@ class AppOpenAdController with WidgetsBindingObserver {
     }
     if (_started) return;
     _started = true;
+    _clicksAtResume = _AdActivity.clickCount;
     WidgetsBinding.instance.addObserver(this);
     await _pool.start();
     if (showOnColdStart) {
-      await showIfAllowed(waitFor: waitForAd);
+      // The launch show is the point of a cold start ad, so it is the one
+      // show allowed to skip the startup grace. It is not awaited: start()
+      // must not block the caller for the length of an ad. Watch [shows] for
+      // the outcome, and call start() only after the user's consent answer is
+      // known.
+      unawaited(showIfAllowed(waitFor: waitForAd, ignoreStartupGrace: true));
     }
   }
 
@@ -112,9 +118,11 @@ class AppOpenAdController with WidgetsBindingObserver {
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
         _backgroundedAt = _clock();
-        // Leaving while an ad owns the screen means the user followed the ad,
-        // not that the session ended.
-        _suppressNextResume = _AdActivity.isShowing || _showing;
+        // Leaving after an ad was clicked, or while one owns the screen, means
+        // the user followed the ad rather than ended the session.
+        _suppressNextResume = _AdActivity.isShowing ||
+            _showing ||
+            _AdActivity.clickCount != _clicksAtResume;
         break;
       case AppLifecycleState.resumed:
         unawaited(_handleResume());
@@ -128,42 +136,42 @@ class AppOpenAdController with WidgetsBindingObserver {
     if (_destroyed) return;
     final leftAt = _backgroundedAt;
     _backgroundedAt = null;
+    _clicksAtResume = _AdActivity.clickCount;
     if (_suppressNextResume) {
       _suppressNextResume = false;
       return;
     }
     if (leftAt == null) return;
-    if (_clock().difference(leftAt) < minimumBackgroundDuration) return;
+    final now = _clock();
+    if (now.difference(leftAt) < minimumBackgroundDuration) return;
     final adEndedAt = _AdActivity.lastShowEndedAt;
     if (adEndedAt != null &&
-        _clock().difference(adEndedAt) < const Duration(seconds: 2)) {
+        now.difference(adEndedAt) < const Duration(seconds: 2)) {
       return;
     }
     await showIfAllowed(waitFor: waitForAd);
   }
 
   /// Shows an app open ad when the policy and the pool allow it.
-  Future<AdShowOutcome> showIfAllowed({Duration? waitFor}) async {
+  Future<AdShowOutcome> showIfAllowed({
+    Duration? waitFor,
+    bool ignoreStartupGrace = false,
+  }) async {
     if (_destroyed) {
       throw StateError('App open ad controller is destroyed.');
     }
     if (_showing) {
-      return const AdShowOutcome._(AdShowStatus.blocked);
-    }
-    final decision = _gate.evaluate();
-    if (!decision.isAllowed) {
-      final outcome =
-          AdShowOutcome._(AdShowStatus.blocked, frequency: decision);
+      const outcome = AdShowOutcome._(AdShowStatus.alreadyShowing);
       _publish(outcome);
       return outcome;
     }
 
     _showing = true;
     try {
-      final outcome = await _pool.showNext(waitFor: waitFor ?? waitForAd);
-      if (outcome.isShown) {
-        _gate.recordShow();
-      }
+      final outcome = await _pool.showNext(
+        waitFor: waitFor ?? waitForAd,
+        ignoreStartupGrace: ignoreStartupGrace,
+      );
       _publish(outcome);
       return outcome;
     } finally {

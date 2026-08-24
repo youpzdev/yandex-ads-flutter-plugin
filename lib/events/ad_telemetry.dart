@@ -46,6 +46,10 @@ enum AdEventType {
 /// Every ad in this plugin reports through [YandexAds.events], so a single
 /// subscription covers banners, full-screen formats and native ads instead of
 /// per-placement callbacks that are easy to forget.
+///
+/// Events are delivered live and never buffered: subscribe before the first
+/// ad is created if the very first load matters. [impressionData] carries
+/// revenue figures, so treat it as commercial data when forwarding it.
 class AdEvent {
   final AdEventType type;
   final AdFormat format;
@@ -83,7 +87,7 @@ class AdEvent {
 }
 
 class _AdEventBus {
-  static final _controller = StreamController<AdEvent>.broadcast(sync: true);
+  static final _controller = StreamController<AdEvent>.broadcast();
 
   static Stream<AdEvent> get stream => _controller.stream;
 
@@ -95,6 +99,11 @@ class _AdEventBus {
     Reward? reward,
     Object? error,
   }) {
+    if (type == AdEventType.clicked) {
+      // A click of any format sends the user away; the return is not a new
+      // session and must not trigger an app open ad.
+      _AdActivity.noteClick();
+    }
     if (!_controller.hasListener) return;
     _controller.add(
       AdEvent(

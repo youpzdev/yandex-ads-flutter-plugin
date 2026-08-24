@@ -90,6 +90,8 @@ class AdFrequencyPolicy {
   static const unlimited = AdFrequencyPolicy(
     minimumInterval: Duration.zero,
     startupGrace: Duration.zero,
+    maximumPerHour: null,
+    maximumPerDay: null,
   );
 
   /// Shortest gap between two shows.
@@ -160,9 +162,12 @@ class AdFrequencyGate {
   })  : _clock = clock ?? DateTime.now,
         _shows = List<DateTime>.from(history ?? const <DateTime>[]) {
     policy.validate();
-    _sessionStart = sessionStart ?? _clock();
+    final now = _clock();
+    _sessionStart = sessionStart ?? now;
+    // A timestamp from the future would block every show until it passes.
+    _shows.removeWhere((show) => show.isAfter(now));
     _shows.sort();
-    _forget(_clock());
+    _forget(now);
   }
 
   /// Show timestamps still inside the tracked day, oldest first.
@@ -175,12 +180,15 @@ class AdFrequencyGate {
   bool get isAllowed => evaluate().isAllowed;
 
   /// Full answer for the current moment, including the reason and the wait.
-  AdFrequencyDecision evaluate() {
+  ///
+  /// [ignoreStartupGrace] is for the one show that is meant to happen at
+  /// launch, such as a cold start app open ad; every other cap still applies.
+  AdFrequencyDecision evaluate({bool ignoreStartupGrace = false}) {
     final now = _clock();
     _forget(now);
 
     final sinceStart = now.difference(_sessionStart);
-    if (sinceStart < policy.startupGrace) {
+    if (!ignoreStartupGrace && sinceStart < policy.startupGrace) {
       return AdFrequencyDecision.blocked(
         AdFrequencyBlock.startupGrace,
         policy.startupGrace - sinceStart,
@@ -246,7 +254,9 @@ class AdFrequencyGate {
   /// Restores a gate from [toJson].
   ///
   /// Timestamps that are unreadable or in the future are dropped rather than
-  /// trusted: a clock change must not unlock an exhausted cap.
+  /// trusted. This guards a clock that is already wrong at startup; a clock
+  /// moved forward while the app runs still ages the history out, because the
+  /// gate has no monotonic time source.
   static AdFrequencyGate fromJson(
     Map<String, Object?> json, {
     AdFrequencyPolicy policy = AdFrequencyPolicy.standard,
@@ -272,6 +282,14 @@ class AdFrequencyGate {
       history: shows,
       sessionStart: sessionStart,
     );
+  }
+
+  /// Releases a reserved show that never reached the user.
+  void _undoShow(DateTime moment) {
+    final index = _shows.lastIndexOf(moment);
+    if (index < 0) return;
+    _shows.removeAt(index);
+    if (_sessionShows > 0) _sessionShows--;
   }
 
   /// Drops the recorded history, for example after a consent change.

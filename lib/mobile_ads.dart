@@ -111,6 +111,8 @@ class YandexAds {
   static Future<void> setUserConsent(bool value) async {
     await _channel.invokeMethod('setUserConsent', value);
     _userConsent = value;
+    // Ads requested under the previous answer must not be shown any more.
+    _AdConsent.invalidate();
   }
 
   /// Whether the indicator for native ad integration errors is shown.
@@ -127,6 +129,7 @@ class YandexAds {
   static Future<void> setAgeRestricted(bool value) async {
     await _channel.invokeMethod('setAgeRestricted', value);
     _ageRestricted = value;
+    _AdConsent.invalidate();
   }
 
   /// Initializes the Mobile Ads SDK.

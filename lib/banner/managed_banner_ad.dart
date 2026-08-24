@@ -81,6 +81,7 @@ class ManagedBannerAdController extends ChangeNotifier {
   DateTime? _visibleSince;
   late Duration _remaining;
   bool _visible = false;
+  int _requestCount = 0;
   double _visibleFraction = 0;
   Duration _viewableDuration = Duration.zero;
   bool _started = false;
@@ -142,6 +143,9 @@ class ManagedBannerAdController extends ChangeNotifier {
     if (!_visible || since == null) return _viewableDuration;
     return _viewableDuration + DateTime.now().difference(since);
   }
+
+  /// Ad requests this placement made since it was created.
+  int get requestCount => _requestCount;
 
   /// Reports how much of the placement is on screen.
   ///
@@ -210,27 +214,29 @@ class ManagedBannerAdController extends ChangeNotifier {
 
   void _pauseVisibleTime() {
     if (!_visible) return;
-    final startedAt = _visibleSince;
-    if (startedAt != null) {
-      final elapsed = DateTime.now().difference(startedAt);
-      _viewableDuration += elapsed;
-      if (!_loading) {
-        _remaining =
-            elapsed >= _remaining ? Duration.zero : _remaining - elapsed;
-      }
+    final elapsed = _accrueVisibleTime();
+    if (elapsed != null && !_loading) {
+      _remaining = elapsed >= _remaining ? Duration.zero : _remaining - elapsed;
     }
     _visible = false;
     _visibleSince = null;
     _refreshTimer?.cancel();
   }
 
+  /// Moves the time since [_visibleSince] into [viewableDuration].
+  Duration? _accrueVisibleTime() {
+    final startedAt = _visibleSince;
+    if (startedAt == null) return null;
+    final elapsed = DateTime.now().difference(startedAt);
+    _viewableDuration += elapsed;
+    _visibleSince = null;
+    return elapsed;
+  }
+
   void _restartVisibleClock() {
     _refreshTimer?.cancel();
     if (!_visible) return;
-    final since = _visibleSince;
-    if (since != null) {
-      _viewableDuration += DateTime.now().difference(since);
-    }
+    _accrueVisibleTime();
     _visibleSince = DateTime.now();
     _scheduleRefresh();
   }
@@ -247,6 +253,7 @@ class ManagedBannerAdController extends ChangeNotifier {
 
   Future<void> _refresh() async {
     if (_destroyed || !_visible || _loading) return;
+    _accrueVisibleTime();
     _remaining = refreshInterval;
     _visibleSince = DateTime.now();
     await _requestLoad();
@@ -258,6 +265,7 @@ class ManagedBannerAdController extends ChangeNotifier {
     if (_pendingLoad != null) return;
     _loading = true;
     _loadAttempted = true;
+    _requestCount++;
     notifyListeners();
     late final Future<void> request;
     request = banner.load(adRequest, timeout: loadTimeout);
@@ -419,14 +427,18 @@ class _ManagedBannerAdWidgetState extends State<ManagedBannerAdWidget>
     final bounds = renderObject.localToGlobal(Offset.zero) & size;
     var visible = bounds.intersect(Offset.zero & MediaQuery.of(context).size);
 
-    // A placement inside a scroll view is also clipped by that view.
-    final RenderObject? scrollViewport =
-        RenderAbstractViewport.maybeOf(renderObject);
-    final viewportBox = scrollViewport is RenderBox ? scrollViewport : null;
-    if (viewportBox != null && viewportBox.hasSize) {
-      final viewportBounds =
-          viewportBox.localToGlobal(Offset.zero) & viewportBox.size;
-      visible = visible.intersect(viewportBounds);
+    // Every scroll view above the placement clips it, not only the closest.
+    RenderObject? ancestor = renderObject.parent;
+    while (ancestor != null) {
+      if (ancestor is RenderBox) {
+        final RenderBox box = ancestor;
+        final isViewport = ancestor is RenderAbstractViewport;
+        if (isViewport && box.hasSize) {
+          final viewportBounds = box.localToGlobal(Offset.zero) & box.size;
+          visible = visible.intersect(viewportBounds);
+        }
+      }
+      ancestor = ancestor.parent;
     }
 
     final width = visible.width > 0 ? visible.width : 0.0;

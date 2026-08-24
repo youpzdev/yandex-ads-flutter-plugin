@@ -15,7 +15,12 @@
 * `YandexAds.events` reports every ad lifecycle event with its ad unit and
   impression payload.
 * `ManagedBannerAdController.visibilityThreshold` measures the viewable share
-  of a banner and reports `visibleFraction` and `viewableDuration`.
+  of a banner and reports `visibleFraction`, `viewableDuration` and
+  `requestCount`.
+* Full-screen shows are serialised: a second show while one is on screen is
+  refused instead of stacking two ads.
+* Ads loaded before a `setUserConsent` or `setAgeRestricted` change are dropped
+  instead of being shown under an answer the user has replaced.
 
 ### Behavior changes against upstream 8.3.0
 

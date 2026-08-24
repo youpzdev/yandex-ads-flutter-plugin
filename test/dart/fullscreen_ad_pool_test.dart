@@ -13,11 +13,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yandex_mobileads/mobile_ads.dart';
 
+import 'support/pool_harness.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('a pool preloads up to its capacity', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -32,7 +34,7 @@ void main() {
     harness.completeLoaded();
     await harness.waitForLoads(2);
     harness.completeLoaded();
-    await _settle();
+    await settle();
 
     expect(pool.availableCount, 2);
     expect(pool.isReady, isTrue);
@@ -40,7 +42,7 @@ void main() {
   });
 
   test('acquire hands out a ready ad and refills behind it', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -52,7 +54,7 @@ void main() {
     await pool.start();
     await harness.waitForLoads(1);
     harness.completeLoaded();
-    await _settle();
+    await settle();
 
     final ad = await pool.acquire();
     expect(ad, isNotNull);
@@ -60,14 +62,14 @@ void main() {
 
     await harness.waitForLoads(2);
     harness.completeLoaded();
-    await _settle();
+    await settle();
     expect(pool.availableCount, 1);
 
     await ad!.destroy();
   });
 
   test('acquire waits for a load that is still in flight', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -84,7 +86,7 @@ void main() {
   });
 
   test('acquire gives up when nothing arrives in time', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -100,7 +102,7 @@ void main() {
   });
 
   test('a stale ad is dropped instead of being handed out', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -115,18 +117,18 @@ void main() {
     await pool.start();
     await harness.waitForLoads(1);
     harness.completeLoaded();
-    await _settle();
+    await settle();
     expect(pool.availableCount, 1);
 
     now = now.add(const Duration(minutes: 11));
     expect(pool.availableCount, 0);
-    await _settle();
+    await settle();
 
     expect(harness.destroyedAds, isNotEmpty);
   });
 
   test('a failed request backs off and is repeated', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -143,7 +145,7 @@ void main() {
     await pool.start();
     await harness.waitForLoads(1);
     harness.completeFailed();
-    await _settle();
+    await settle();
 
     expect(pool.state.status, FullscreenAdPoolStatus.backingOff);
     expect(pool.state.consecutiveFailures, 1);
@@ -151,14 +153,14 @@ void main() {
 
     await harness.waitForLoads(2);
     harness.completeLoaded();
-    await _settle();
+    await settle();
 
     expect(pool.availableCount, 1);
     expect(pool.state.consecutiveFailures, 0);
   });
 
   test('the frequency policy blocks a show before an ad is taken', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -184,7 +186,7 @@ void main() {
     await pool.start();
     await harness.waitForLoads(1);
     harness.completeLoaded();
-    await _settle();
+    await settle();
 
     final outcome = await pool.showNext();
 
@@ -194,7 +196,7 @@ void main() {
   });
 
   test('showNext displays, records the show and releases the ad', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -223,7 +225,7 @@ void main() {
     await pool.start();
     await harness.waitForLoads(1);
     harness.completeLoaded();
-    await _settle();
+    await settle();
 
     var clicked = false;
     final showing = pool.showNext(onAdClicked: () => clicked = true);
@@ -257,8 +259,147 @@ void main() {
     );
   });
 
+  test('a used up retry budget stops requesting until retry()', () async {
+    final harness = PoolHarness();
+    addTearDown(harness.dispose);
+    harness.install();
+
+    final pool = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+      retryPolicy: const AdRetryPolicy(
+        initialDelay: Duration(milliseconds: 10),
+        maximumDelay: Duration(milliseconds: 10),
+        jitter: 0,
+        maximumAttempts: 2,
+      ),
+    );
+    addTearDown(pool.destroy);
+
+    await pool.start();
+    await harness.waitForLoads(1);
+    harness.completeFailed();
+    await harness.waitForLoads(2);
+    harness.completeFailed();
+    await settle();
+
+    expect(pool.state.status, FullscreenAdPoolStatus.exhausted);
+
+    // A pool that gave up must not request again through the back door.
+    await pool.acquire();
+    await settle();
+    expect(harness.loadCalls, 2);
+
+    await pool.retry();
+    await harness.waitForLoads(3);
+    harness.completeLoaded();
+    await settle();
+    expect(pool.availableCount, 1);
+  });
+
+  test('a show that the platform refuses returns the cap', () async {
+    final harness = PoolHarness();
+    addTearDown(harness.dispose);
+    harness.install();
+
+    var now = DateTime(2026, 8, 24, 12);
+    final gate = AdFrequencyGate(
+      policy: const AdFrequencyPolicy(
+        startupGrace: Duration.zero,
+        minimumInterval: Duration(minutes: 5),
+        maximumPerHour: null,
+        maximumPerDay: null,
+      ),
+      clock: () => now,
+    );
+
+    final pool = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+      frequencyGate: gate,
+      clock: () => now,
+    );
+    addTearDown(pool.destroy);
+
+    await pool.start();
+    await harness.waitForLoads(1);
+    harness.completeLoaded();
+    await settle();
+
+    final showing = pool.showNext();
+    await harness.waitForShow();
+    harness.emitAdEvent({
+      'name': 'onAdFailedToShow',
+      'description': 'no activity',
+    });
+    final outcome = await showing;
+
+    expect(outcome.status, AdShowStatus.failed);
+    expect(gate.sessionShowCount, 0,
+        reason: 'a show that never happened must not consume the cap');
+    expect(gate.isAllowed, isTrue);
+  });
+
+  test('a second show is refused while one is on screen', () async {
+    final harness = PoolHarness();
+    addTearDown(harness.dispose);
+    harness.install();
+
+    final pool = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+      capacity: 2,
+    );
+    addTearDown(pool.destroy);
+
+    await pool.start();
+    await harness.waitForLoads(1);
+    harness.completeLoaded();
+    await harness.waitForLoads(2);
+    harness.completeLoaded();
+    await settle();
+
+    final first = pool.showNext();
+    await harness.waitForShow();
+    final second = await pool.showNext();
+
+    expect(second.status, AdShowStatus.alreadyShowing);
+    expect(harness.showCalls, 1);
+
+    harness.emitAdEvent({'name': 'onAdShown'});
+    harness.emitAdEvent({'name': 'onAdDismissed'});
+    expect((await first).isShown, isTrue);
+  });
+
+  test('a consent change drops ads requested under the old answer', () async {
+    final harness = PoolHarness();
+    addTearDown(harness.dispose);
+    harness.install();
+
+    const consentChannel = MethodChannel('yandex_mobileads.mobileAds');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(consentChannel, (call) async => null);
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(consentChannel, null);
+    });
+
+    final pool = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+    );
+    addTearDown(pool.destroy);
+
+    await pool.start();
+    await harness.waitForLoads(1);
+    harness.completeLoaded();
+    await settle();
+    expect(pool.availableCount, 1);
+
+    await YandexAds.setUserConsent(false);
+
+    expect(pool.availableCount, 0,
+        reason: 'the ad was requested under the previous answer');
+  });
+
   test('showNext reports that nothing was ready', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -273,7 +414,7 @@ void main() {
   });
 
   test('destroy releases held ads and refuses further use', () async {
-    final harness = _PoolHarness();
+    final harness = PoolHarness();
     addTearDown(harness.dispose);
     harness.install();
 
@@ -284,7 +425,7 @@ void main() {
     await pool.start();
     await harness.waitForLoads(1);
     harness.completeLoaded();
-    await _settle();
+    await settle();
 
     await pool.destroy();
     await pool.destroy();
@@ -293,129 +434,4 @@ void main() {
     expect(pool.isDestroyed, isTrue);
     expect(() => pool.acquire(), throwsStateError);
   });
-}
-
-Future<void> _settle() =>
-    Future<void>.delayed(const Duration(milliseconds: 20));
-
-class _PoolHarness {
-  final _methodChannels = <MethodChannel>[];
-  final _eventChannels = <EventChannel>[];
-  final destroyedAds = <int>[];
-
-  int loadCalls = 0;
-  int showCalls = 0;
-  int lastAdId = 0;
-  int? _requestId;
-  MockStreamHandlerEventSink? _loaderEvents;
-  MockStreamHandlerEventSink? _adEvents;
-
-  TestDefaultBinaryMessenger get _messenger =>
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-
-  void install() {
-    const createChannel = MethodChannel('yandex_mobileads.createAdLoader');
-    _methodChannels.add(createChannel);
-    _messenger.setMockMethodCallHandler(createChannel, (call) async {
-      final id = (call.arguments as Map<dynamic, dynamic>)['id'] as int;
-      final channel =
-          MethodChannel('yandex_mobileads.interstitialAdLoader.$id');
-      final events = EventChannel('${channel.name}.events');
-      _methodChannels.add(channel);
-      _eventChannels.add(events);
-      _messenger.setMockStreamHandler(
-        events,
-        MockStreamHandler.inline(
-          onListen: (_, sink) => _loaderEvents = sink,
-        ),
-      );
-      _messenger.setMockMethodCallHandler(channel, (call) async {
-        switch (call.method) {
-          case 'load':
-            loadCalls++;
-            _requestId =
-                (call.arguments as Map<dynamic, dynamic>)['requestId'] as int;
-            break;
-        }
-        return null;
-      });
-      return null;
-    });
-  }
-
-  Future<void> waitForLoads(int count) async {
-    final deadline = DateTime.now().add(const Duration(seconds: 5));
-    while (loadCalls < count) {
-      if (DateTime.now().isAfter(deadline)) {
-        throw StateError('Expected $count load calls, saw $loadCalls');
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 1));
-    }
-  }
-
-  Future<void> waitForShow() async {
-    final deadline = DateTime.now().add(const Duration(seconds: 5));
-    while (showCalls == 0 || _adEvents == null) {
-      if (DateTime.now().isAfter(deadline)) {
-        throw StateError('The ad was never shown');
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 1));
-    }
-  }
-
-  void completeLoaded({String adUnitId = 'unit'}) {
-    lastAdId++;
-    final adId = lastAdId;
-    _installAdChannels(adId);
-    _loaderEvents!.success({
-      'name': 'onAdLoaded',
-      'requestId': _requestId,
-      'id': adId,
-      'adUnitId': adUnitId,
-      'adInfo': {'adUnitId': adUnitId},
-    });
-  }
-
-  void completeFailed({int code = 1, String description = 'no fill'}) {
-    _loaderEvents!.success({
-      'name': 'onAdFailedToLoad',
-      'requestId': _requestId,
-      'code': code,
-      'description': description,
-      'adUnitId': 'unit',
-    });
-  }
-
-  void emitAdEvent(Map<String, Object?> event) => _adEvents!.success(event);
-
-  void _installAdChannels(int adId) {
-    final channel = MethodChannel('yandex_mobileads.interstitialAd.$adId');
-    final events = EventChannel('${channel.name}.events');
-    _methodChannels.add(channel);
-    _eventChannels.add(events);
-    _messenger.setMockStreamHandler(
-      events,
-      MockStreamHandler.inline(onListen: (_, sink) => _adEvents = sink),
-    );
-    _messenger.setMockMethodCallHandler(channel, (call) async {
-      switch (call.method) {
-        case 'show':
-          showCalls++;
-          break;
-        case 'destroy':
-          destroyedAds.add(adId);
-          break;
-      }
-      return null;
-    });
-  }
-
-  void dispose() {
-    for (final channel in _methodChannels) {
-      _messenger.setMockMethodCallHandler(channel, null);
-    }
-    for (final channel in _eventChannels) {
-      _messenger.setMockStreamHandler(channel, null);
-    }
-  }
 }

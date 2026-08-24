@@ -18,10 +18,19 @@ part of '../mobile_ads.dart';
 class _AdActivity {
   static int _visibleCount = 0;
   static DateTime? _endedAt;
+  static int _clickCount = 0;
 
   static bool get isShowing => _visibleCount > 0;
 
   static DateTime? get lastShowEndedAt => _endedAt;
+
+  /// How many ads of any format were clicked in this process.
+  ///
+  /// A counter rather than a timestamp: it needs no clock, so a comparison
+  /// stays correct no matter which clock the caller uses.
+  static int get clickCount => _clickCount;
+
+  static void noteClick() => _clickCount++;
 
   static void begin() => _visibleCount++;
 
@@ -29,6 +38,15 @@ class _AdActivity {
     if (_visibleCount > 0) _visibleCount--;
     _endedAt = DateTime.now();
   }
+}
+
+/// Invalidates ads that were requested under a consent that no longer holds.
+class _AdConsent {
+  static int _generation = 0;
+
+  static int get generation => _generation;
+
+  static void invalidate() => _generation++;
 }
 
 /// What a pool is doing right now.
@@ -44,6 +62,9 @@ enum FullscreenAdPoolStatus {
 
   /// The last request failed and the next attempt is scheduled.
   backingOff,
+
+  /// The retry budget is used up; nothing will be requested until [retry].
+  exhausted,
 
   /// The pool released its resources.
   destroyed,
@@ -90,6 +111,9 @@ enum AdShowStatus {
 
   /// No ad was ready in time.
   unavailable,
+
+  /// Another full-screen ad owns the screen right now.
+  alreadyShowing,
 
   /// The ad was ready but the platform refused to display it.
   failed,
@@ -144,8 +168,9 @@ class _PoolCallbacks {
 class _PoolSlot {
   final _FullscreenAd ad;
   final DateTime loadedAt;
+  final int consentGeneration;
 
-  _PoolSlot(this.ad, this.loadedAt);
+  _PoolSlot(this.ad, this.loadedAt, this.consentGeneration);
 }
 
 /// Keeps full-screen ads loaded before they are needed.
@@ -155,7 +180,7 @@ class _PoolSlot {
 /// does not happen. The pool loads ahead of time, replaces ads that went
 /// stale, spaces failed requests with [AdRetryPolicy] and can enforce an
 /// [AdFrequencyPolicy] on the shows themselves.
-class FullscreenAdPool<T extends Object> {
+class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
   /// Ads older than this are dropped instead of shown.
   ///
   /// This is the plugin's own ceiling, not a guarantee from the ad network:
@@ -173,6 +198,12 @@ class FullscreenAdPool<T extends Object> {
 
   /// Deadline for a single load request.
   final Duration loadTimeout;
+
+  /// Deadline for a single show.
+  ///
+  /// A native layer that dies without closing its event channel would
+  /// otherwise leave the plugin believing an ad still owns the screen.
+  final Duration showTimeout;
 
   /// How failed requests are repeated.
   final AdRetryPolicy retryPolicy;
@@ -192,6 +223,9 @@ class FullscreenAdPool<T extends Object> {
 
   Timer? _retryTimer;
   Timer? _expiryTimer;
+  bool _showInFlight = false;
+  bool _retryPending = false;
+  bool _observing = false;
   bool _started = false;
   bool _destroyed = false;
   bool _filling = false;
@@ -207,6 +241,7 @@ class FullscreenAdPool<T extends Object> {
     required this.capacity,
     required this.timeToLive,
     required this.loadTimeout,
+    required this.showTimeout,
     required this.retryPolicy,
     required this.frequencyGate,
     DateTime Function()? clock,
@@ -225,6 +260,9 @@ class FullscreenAdPool<T extends Object> {
     if (loadTimeout <= Duration.zero) {
       throw ArgumentError.value(loadTimeout, 'loadTimeout', 'Must be positive.');
     }
+    if (showTimeout <= Duration.zero) {
+      throw ArgumentError.value(showTimeout, 'showTimeout', 'Must be positive.');
+    }
     retryPolicy.validate();
   }
 
@@ -238,6 +276,7 @@ class FullscreenAdPool<T extends Object> {
     int capacity = 1,
     Duration timeToLive = defaultTimeToLive,
     Duration loadTimeout = const Duration(seconds: 30),
+    Duration showTimeout = const Duration(minutes: 5),
     AdRetryPolicy retryPolicy = AdRetryPolicy.standard,
     AdFrequencyGate? frequencyGate,
     DateTime Function()? clock,
@@ -261,6 +300,7 @@ class FullscreenAdPool<T extends Object> {
       capacity: capacity,
       timeToLive: timeToLive,
       loadTimeout: loadTimeout,
+      showTimeout: showTimeout,
       retryPolicy: retryPolicy,
       frequencyGate: frequencyGate,
       clock: clock,
@@ -274,6 +314,7 @@ class FullscreenAdPool<T extends Object> {
     int capacity = 1,
     Duration timeToLive = defaultTimeToLive,
     Duration loadTimeout = const Duration(seconds: 30),
+    Duration showTimeout = const Duration(minutes: 5),
     AdRetryPolicy retryPolicy = AdRetryPolicy.standard,
     AdFrequencyGate? frequencyGate,
     DateTime Function()? clock,
@@ -298,6 +339,7 @@ class FullscreenAdPool<T extends Object> {
       capacity: capacity,
       timeToLive: timeToLive,
       loadTimeout: loadTimeout,
+      showTimeout: showTimeout,
       retryPolicy: retryPolicy,
       frequencyGate: frequencyGate,
       clock: clock,
@@ -311,6 +353,7 @@ class FullscreenAdPool<T extends Object> {
     int capacity = 1,
     Duration timeToLive = const Duration(minutes: 30),
     Duration loadTimeout = const Duration(seconds: 20),
+    Duration showTimeout = const Duration(minutes: 5),
     AdRetryPolicy retryPolicy = AdRetryPolicy.standard,
     AdFrequencyGate? frequencyGate,
     DateTime Function()? clock,
@@ -334,6 +377,7 @@ class FullscreenAdPool<T extends Object> {
       capacity: capacity,
       timeToLive: timeToLive,
       loadTimeout: loadTimeout,
+      showTimeout: showTimeout,
       retryPolicy: retryPolicy,
       frequencyGate: frequencyGate,
       clock: clock,
@@ -345,13 +389,18 @@ class FullscreenAdPool<T extends Object> {
   Stream<FullscreenAdPoolState> get states => _stateController.stream;
 
   /// Current pool state.
-  FullscreenAdPoolState get state => FullscreenAdPoolState(
-        status: _status,
-        available: availableCount,
-        capacity: capacity,
-        consecutiveFailures: _consecutiveFailures,
-        lastError: _lastError,
-      );
+  FullscreenAdPoolState get state {
+    // Expiry is checked first so that the status cannot claim a ready ad the
+    // very same snapshot reports as gone.
+    final available = availableCount;
+    return FullscreenAdPoolState(
+      status: _status,
+      available: available,
+      capacity: capacity,
+      consecutiveFailures: _consecutiveFailures,
+      lastError: _lastError,
+    );
+  }
 
   /// Ads ready to show right now.
   int get availableCount {
@@ -372,8 +421,25 @@ class FullscreenAdPool<T extends Object> {
     if (_destroyed) return FullscreenAdPoolStatus.destroyed;
     if (_slots.isNotEmpty) return FullscreenAdPoolStatus.ready;
     if (_filling) return FullscreenAdPoolStatus.loading;
-    if (_retryTimer != null) return FullscreenAdPoolStatus.backingOff;
-    return _started ? FullscreenAdPoolStatus.loading : FullscreenAdPoolStatus.idle;
+    if (_retryTimer != null || _retryPending) {
+      return FullscreenAdPoolStatus.backingOff;
+    }
+    if (!retryPolicy.allowsAttempt(_consecutiveFailures)) {
+      return FullscreenAdPoolStatus.exhausted;
+    }
+    return _started
+        ? FullscreenAdPoolStatus.loading
+        : FullscreenAdPoolStatus.idle;
+  }
+
+  /// Starts requesting again after the retry budget was used up.
+  Future<void> retry() async {
+    _ensureAlive();
+    _consecutiveFailures = 0;
+    _lastError = null;
+    _retryPending = false;
+    await start();
+    unawaited(_fill());
   }
 
   /// Starts keeping the pool filled.
@@ -385,7 +451,30 @@ class FullscreenAdPool<T extends Object> {
     _ensureAlive();
     if (_started) return;
     _started = true;
+    if (!_observing) {
+      _observing = true;
+      WidgetsBinding.instance.addObserver(this);
+    }
     unawaited(_fill());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_destroyed) return;
+    if (state == AppLifecycleState.resumed) {
+      if (_retryPending && _retryTimer == null) {
+        _retryPending = false;
+        unawaited(_fill());
+      }
+      return;
+    }
+    // A backgrounded app must not keep asking for inventory it cannot show.
+    if (_retryTimer != null) {
+      _retryTimer!.cancel();
+      _retryTimer = null;
+      _retryPending = true;
+      _publish();
+    }
   }
 
   /// Takes a ready ad out of the pool.
@@ -398,6 +487,8 @@ class FullscreenAdPool<T extends Object> {
 
     var slot = _takeSlot();
     if (slot == null && waitFor != null && waitFor > Duration.zero) {
+      // Ask before waiting: nothing may be in flight at all.
+      unawaited(_fill());
       await _waitForSlot(waitFor);
       slot = _takeSlot();
     }
@@ -413,6 +504,7 @@ class FullscreenAdPool<T extends Object> {
   /// forwarded to the caller.
   Future<AdShowOutcome> showNext({
     Duration? waitFor,
+    bool ignoreStartupGrace = false,
     void Function()? onAdShown,
     void Function()? onAdClicked,
     void Function(ImpressionData impressionData)? onAdImpression,
@@ -420,62 +512,99 @@ class FullscreenAdPool<T extends Object> {
     void Function(Reward reward)? onRewarded,
   }) async {
     _ensureAlive();
+    // Two placements must never race into two ads in a row, and the cap has to
+    // be reserved before the first await, not when the platform reports back.
+    if (_showInFlight || _AdActivity.isShowing) {
+      return const AdShowOutcome._(AdShowStatus.alreadyShowing);
+    }
     final gate = frequencyGate;
     if (gate != null) {
-      final decision = gate.evaluate();
+      final decision = gate.evaluate(ignoreStartupGrace: ignoreStartupGrace);
       if (!decision.isAllowed) {
         return AdShowOutcome._(AdShowStatus.blocked, frequency: decision);
       }
     }
 
+    _showInFlight = true;
+    final reservation = _clock();
+    gate?.recordShow(reservation);
+    try {
+      return await _showReserved(
+        gate: gate,
+        reservation: reservation,
+        waitFor: waitFor,
+        onAdShown: onAdShown,
+        onAdClicked: onAdClicked,
+        onAdImpression: onAdImpression,
+        onAdDismissed: onAdDismissed,
+        onRewarded: onRewarded,
+      );
+    } finally {
+      _showInFlight = false;
+    }
+  }
+
+  Future<AdShowOutcome> _showReserved({
+    required AdFrequencyGate? gate,
+    required DateTime reservation,
+    Duration? waitFor,
+    void Function()? onAdShown,
+    void Function()? onAdClicked,
+    void Function(ImpressionData impressionData)? onAdImpression,
+    void Function()? onAdDismissed,
+    void Function(Reward reward)? onRewarded,
+  }) async {
     final ad = await acquire(waitFor: waitFor);
     if (ad == null) {
+      gate?._undoShow(reservation);
       return const AdShowOutcome._(AdShowStatus.unavailable);
     }
 
     final fullscreen = ad as _FullscreenAd;
     Reward? reward;
     AdError? failure;
-    var recorded = false;
 
-    await _listen(
+    try {
+      await _listen(
       fullscreen,
       _PoolCallbacks(
-        onShown: () {
-          if (!recorded) {
-            recorded = true;
-            gate?.recordShow();
-          }
-          onAdShown?.call();
-        },
+        onShown: () => onAdShown?.call(),
         onFailedToShow: (error) => failure ??= error,
         onDismissed: () => onAdDismissed?.call(),
         onClicked: () => onAdClicked?.call(),
-        onImpression: (data) => onAdImpression?.call(data),
-        onRewarded: (value) {
-          reward = value;
-          onRewarded?.call(value);
-        },
-      ),
-    );
+          onImpression: (data) => onAdImpression?.call(data),
+          onRewarded: (value) {
+            reward = value;
+            onRewarded?.call(value);
+          },
+        ),
+      );
 
-    _AdActivity.begin();
-    try {
+      _AdActivity.begin();
       await fullscreen.show();
-      final dismissed = await fullscreen.waitForDismiss();
+      final dismissed = await fullscreen.waitForDismiss().timeout(
+            showTimeout,
+            onTimeout: () => null,
+          );
       if (dismissed is Reward) reward = dismissed;
     } on AdError catch (error) {
       failure ??= error;
     } on PlatformException catch (error) {
       failure ??= AdError(error.message ?? error.code);
+    } catch (error) {
+      failure ??= AdError(error.toString());
     } finally {
       _AdActivity.end();
-      await fullscreen.destroy();
+      // Releasing a shown ad must never replace its outcome with an error.
+      try {
+        await fullscreen.destroy();
+      } catch (_) {}
       unawaited(_fill());
     }
 
     final error = failure;
     if (error != null) {
+      gate?._undoShow(reservation);
       return AdShowOutcome._(AdShowStatus.failed, error: error);
     }
     return AdShowOutcome._(AdShowStatus.shown, reward: reward);
@@ -487,6 +616,10 @@ class FullscreenAdPool<T extends Object> {
   Future<void> _destroy() async {
     if (_destroyed) return;
     _destroyed = true;
+    if (_observing) {
+      _observing = false;
+      WidgetsBinding.instance.removeObserver(this);
+    }
     _retryTimer?.cancel();
     _expiryTimer?.cancel();
     _retryTimer = null;
@@ -523,7 +656,22 @@ class FullscreenAdPool<T extends Object> {
     return slot;
   }
 
+  /// Waits until a slot is free, or [timeout] elapses.
+  ///
+  /// A single load wakes every waiter, so a waiter that lost the race keeps
+  /// waiting for the rest of its own deadline instead of giving up early.
   Future<void> _waitForSlot(Duration timeout) async {
+    final elapsed = Stopwatch()..start();
+    while (!_destroyed) {
+      _dropExpired();
+      if (_slots.isNotEmpty) return;
+      final remaining = timeout - elapsed.elapsed;
+      if (remaining <= Duration.zero) return;
+      await _waitOnce(remaining);
+    }
+  }
+
+  Future<void> _waitOnce(Duration timeout) async {
     final waiter = Completer<void>();
     _waiters.add(waiter);
     final timer = Timer(timeout, () {
@@ -547,7 +695,8 @@ class FullscreenAdPool<T extends Object> {
 
   Future<void> _fill() async {
     if (_destroyed || !_started || _filling) return;
-    if (_retryTimer != null) return;
+    if (_retryTimer != null || _retryPending) return;
+    if (!retryPolicy.allowsAttempt(_consecutiveFailures)) return;
     _dropExpired();
     if (_slots.length >= capacity) {
       _scheduleExpiry();
@@ -564,7 +713,7 @@ class FullscreenAdPool<T extends Object> {
             await ad.destroy();
             return;
           }
-          _slots.add(_PoolSlot(ad, _clock()));
+          _slots.add(_PoolSlot(ad, _clock(), _AdConsent.generation));
           _consecutiveFailures = 0;
           _lastError = null;
           _releaseWaiters();
@@ -589,6 +738,15 @@ class FullscreenAdPool<T extends Object> {
   void _scheduleRetry() {
     if (_destroyed) return;
     if (!retryPolicy.allowsAttempt(_consecutiveFailures)) {
+      _publish();
+      return;
+    }
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (_observing &&
+        lifecycle != null &&
+        lifecycle != AppLifecycleState.resumed) {
+      // Retry when the user is back: inventory cannot be shown in background.
+      _retryPending = true;
       _publish();
       return;
     }
@@ -624,9 +782,13 @@ class FullscreenAdPool<T extends Object> {
   void _dropExpired() {
     if (_slots.isEmpty) return;
     final now = _clock();
+    final consent = _AdConsent.generation;
     final expired = <_PoolSlot>[];
     _slots.removeWhere((slot) {
-      final isExpired = now.difference(slot.loadedAt) >= timeToLive;
+      // An ad requested under a consent the user has since changed must not
+      // be shown, however fresh it is.
+      final isExpired = now.difference(slot.loadedAt) >= timeToLive ||
+          slot.consentGeneration != consent;
       if (isExpired) expired.add(slot);
       return isExpired;
     });

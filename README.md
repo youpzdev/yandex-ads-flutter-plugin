@@ -46,6 +46,13 @@ await pool.destroy();
 `acquire` is available when the placement wants to own the ad itself; the
 caller then has to destroy it.
 
+The pool refuses a second show while one is on screen (`AdShowStatus
+.alreadyShowing`), returns the reserved cap when a show fails, and drops ads
+that were requested before `setUserConsent` or `setAgeRestricted` changed the
+answer. After the retry budget is used up the pool stops requesting and reports
+`FullscreenAdPoolStatus.exhausted` until `retry()` is called; while the app is
+in the background retries are held instead of firing.
+
 ### Pacing
 
 `AdFrequencyPolicy` limits how often a full-screen ad may appear: a minimum
@@ -73,7 +80,12 @@ final appOpen = AppOpenAdController(
   frequencyPolicy: AdFrequencyPolicy.conservative,
 );
 await appOpen.start();
+appOpen.shows.listen((outcome) => log('app open: ${outcome.status}'));
 ```
+
+Call `start()` only after the user's consent answer is known: it preloads and,
+with `showOnColdStart`, shows the launch ad. `start()` returns immediately —
+the outcome of every attempt, including refusals, arrives on `shows`.
 
 ### Ad events
 
