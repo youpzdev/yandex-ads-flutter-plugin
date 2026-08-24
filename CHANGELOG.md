@@ -32,6 +32,12 @@
 
 ### Fixed in the native bridge
 
+* Native ads never loaded on Android: the view called `NativeAdLoader
+  .cancelLoading()` right before every request, and the cancelled loader then
+  answered nothing at all — no ad, no error — so the Dart side waited out its
+  30 second timeout. Each request now uses its own loader, which also keeps a
+  cancelled load from poisoning the next one.
+
 * Android reported a failed show as `onAdShown`: the constant for
   `onAdFailedToShow` carried the wrong name, so a refused show looked
   successful, never reached its terminal event and consumed a frequency cap.

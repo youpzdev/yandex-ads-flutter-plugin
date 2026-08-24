@@ -46,8 +46,9 @@ internal class FlutterNativeAdView(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val density = context.resources.displayMetrics.density
+    private val viewContext = context
     private val nativeAdView = NativeAdView(context)
-    private val adLoader = NativeAdLoader(context)
+    private var adLoader: NativeAdLoader? = null
     private val binder: NativeAdViewBinder
     private lateinit var contentView: LinearLayout
     private var eventListener: NativeAdFlutterEventListener? = null
@@ -97,8 +98,9 @@ internal class FlutterNativeAdView(
             loadPending = true
             pendingAdUnitId = adUnitId
             try {
-                adLoader.cancelLoading()
-                adLoader.loadAd(args.toAdRequest(adUnitId), object : NativeAdLoadListener {
+                val loader = NativeAdLoader(viewContext)
+                adLoader = loader
+                loader.loadAd(args.toAdRequest(adUnitId), object : NativeAdLoadListener {
                     override fun onAdLoaded(loadedAd: NativeAd) {
                         runOnMain {
                             if (destroyed) {
@@ -139,7 +141,8 @@ internal class FlutterNativeAdView(
             if (!destroyed) {
                 loadGeneration++
                 loadPending = false
-                adLoader.cancelLoading()
+                adLoader?.cancelLoading()
+                adLoader = null
                 releaseLoadedAd()
                 hideNativeAd()
             }
@@ -159,7 +162,8 @@ internal class FlutterNativeAdView(
             if (!destroyed) {
                 destroyed = true
                 loadGeneration++
-                adLoader.cancelLoading()
+                adLoader?.cancelLoading()
+                adLoader = null
                 if (loadPending) {
                     loadPending = false
                     eventListener?.onAdFailedToLoad(

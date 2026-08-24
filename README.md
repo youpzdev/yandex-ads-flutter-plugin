@@ -232,8 +232,9 @@ Full list: [CHANGELOG.md](CHANGELOG.md).
 * iOS is not compiled: the fork was developed on Windows. The Swift sources
   were reviewed statically and checked against the SDK 8 documentation and the
   official examples, but an Xcode build is required before trusting them.
-* Android is verified by building and running the example app on a device;
-  real fill, impressions and clicks on production ad units are not.
+* Android is verified on a device: banners, app open ads and native ads load
+  and render from Yandex's demo placements, with impressions reported. Real
+  fill and revenue on production ad units are not verified.
 * Moving the system clock forward ages the frequency history out — the gate has
   no monotonic time source.
 * A banner covered by another widget inside the same screen still counts as
