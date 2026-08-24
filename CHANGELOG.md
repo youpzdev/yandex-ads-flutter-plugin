@@ -2,6 +2,18 @@
 
 ## Unreleased — maintained fork
 
+### Behavior changes against upstream 8.3.0
+
+* `BannerAd.load` now completes only after the native side accepts the request,
+  which requires the matching `AdWidget` to be mounted. It takes a `timeout`
+  (30 seconds by default) and fails with `TimeoutException` instead of waiting
+  forever; overlapping calls throw `StateError`.
+* Native ad template minimums are now computed from the template and the
+  content padding: `compact` needs 324 × 412 and `media` needs 324 × 432 at the
+  default padding.
+* `ManagedBannerAdController` takes a `loadTimeout` and recovers the refresh
+  cycle when a request is accepted and never answered.
+
 * Added Android and iOS Native Ads with SDK-bound compact/media templates,
   safe style presets, layout validation, early-event buffering and cancellable
   loading.

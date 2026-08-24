@@ -77,11 +77,11 @@ class _NativeAdPageState extends State<NativeAdPage> {
               items: const [
                 DropdownMenuItem(
                   value: NativeAdTemplate.compact,
-                  child: Text('Compact — 324 × 344 minimum'),
+                  child: Text('Compact — 324 × 412 minimum'),
                 ),
                 DropdownMenuItem(
                   value: NativeAdTemplate.media,
-                  child: Text('Media — 324 × 364 minimum'),
+                  child: Text('Media — 324 × 432 minimum'),
                 ),
               ],
               onChanged: (template) {

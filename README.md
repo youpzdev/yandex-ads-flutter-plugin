@@ -45,7 +45,7 @@ media and click handling stay under Yandex Mobile Ads SDK control.
 final nativeAd = NativeAd(
   adRequest: const AdRequest(adUnitId: 'demo-native-content-yandex'),
   width: 324,
-  height: 364,
+  height: 432,
   template: NativeAdTemplate.media,
   style: NativeAdStyle.brandSafe,
 );
@@ -63,14 +63,25 @@ Available template minimums are:
 
 | Template | Minimum logical size | Media height |
 | --- | ---: | ---: |
-| `compact` | 324 × 344 | 160 |
-| `media` | 324 × 364 | 180 |
+| `compact` | 324 × 412 | 160 |
+| `media` | 324 × 432 | 180 |
 
-Both templates reserve a media width of at least 300 logical pixels and 64 × 64
-interactive assets. The built-in style presets are `light`, `dark` and
-`brandSafe`; a custom `NativeAdStyle` may override bounded colors, corner radius
-and padding. A load timeout sends `cancelLoading` to native code and suppresses
-late callbacks.
+Both templates reserve a media width of at least 300 logical pixels, 64 × 64
+interactive assets and three metadata lines. A larger `contentPadding` raises
+the minimum on every layer: use `NativeAdTemplate.minimumWidthFor` and
+`minimumHeightFor` instead of the constants above when you change padding.
+
+If the loaded creative still needs more room than the container, the ad is not
+displayed and `onAdFailedToLoad` reports the size the bound content actually
+requires. The built-in style presets are `light`, `dark` and `brandSafe`; a
+custom `NativeAdStyle` may override bounded colors, corner radius and padding.
+A load timeout sends `cancelLoading` to native code and suppresses late
+callbacks.
+
+A native ad survives its platform view: when Flutter recreates the view (for
+example after scrolling far out of a list and back), the native layer rebinds
+the ad it already holds instead of requesting a new one, and a load that was
+interrupted mid-flight is re-sent.
 
 ### Lifecycle behavior
 

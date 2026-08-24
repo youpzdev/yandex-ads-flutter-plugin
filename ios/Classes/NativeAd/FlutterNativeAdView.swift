@@ -156,7 +156,7 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
             ad.delegate = nil
             nativeAdView.isHidden = true
             isLoadPending = false
-            sendLoadFailure(error: error, adUnitID: adUnitID)
+            sendLoadFailure(error: error, adUnitID: adUnitID, code: -2)
         }
     }
 
@@ -166,11 +166,11 @@ final class FlutterNativeAdView: NSObject, FlutterPlatformView {
         onAdReady?(nil)
     }
 
-    private func sendLoadFailure(error: Error, adUnitID: String) {
+    private func sendLoadFailure(error: Error, adUnitID: String, code: Int? = nil) {
         eventRelay.send(
             name: "onAdFailedToLoad",
             values: [
-                "code": error._code,
+                "code": code ?? error._code,
                 "description": error.localizedDescription,
                 "adUnitId": adUnitID,
             ]
@@ -259,7 +259,7 @@ private final class NativeAdEventRelay: NSObject, @preconcurrency FlutterStreamH
     private var sink: FlutterEventSink?
     private var pendingEvents: [[String: Any?]] = []
 
-    private let maximumPendingEvents = 32
+    private let maximumPendingEvents = 8
 
     func attach(to owner: FlutterNativeAdView) {
         self.owner = owner

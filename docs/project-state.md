@@ -35,21 +35,22 @@
 - Исходник опубликованного пакета 8.3.0 перенесён в корень с сохранением отдельного Apache-текста для glue-кода и GitHub EULA.
 - Инициализация SDK повторяется после ошибки; загрузчики full-screen форматов имеют единый timeout на инициализацию, создание и native request, отменяют pending operation и освобождаются идемпотентно.
 - Managed banner refresh имеет пресеты `conservative` 120 секунд, `standard` 60 секунд и `engaged` 30 секунд. Время считается только при видимом placement и состоянии приложения `resumed`; интервал и retry меньше 30 секунд запрещены.
-- Native Ads реализованы на Android и iOS через `<native-ad>` PlatformView, per-view method/event channels, SDK-bound assets и шаблоны `compact`/`media`. Минимумы — 324×344 и 324×364 соответственно; media не уже 300 и не ниже 160.
+- Native Ads реализованы на Android и iOS через `<native-ad>` PlatformView, per-view method/event channels, SDK-bound assets и шаблоны `compact`/`media`. Минимумы считаются из шаблона и `contentPadding` одинаковой формулой на всех слоях: при стандартном отступе 324×412 (`compact`) и 324×432 (`media`).
 - Native load имеет timeout, `cancelLoading`, generation guard и очередь событий до готовности EventChannel. Поздний callback не показывает creative после отмены.
 - Добавлены светлый, тёмный и контрастный brand-safe стилевые пресеты.
 
 ## Этап
 
-Реализация, независимый review и доступная локальная верификация завершены. Изменения фиксируются логическими локальными Git-коммитами; публикация пакета, внешний push и device release-smoke в этот этап не входят.
+Реализация, независимый review Dart, Android и iOS и доступная локальная верификация завершены.
+Открытый долг: Xcode-сборка iOS и device smoke-test обеих платформ. Изменения фиксируются логическими локальными Git-коммитами; публикация пакета, внешний push и device release-smoke в этот этап не входят.
 
 ## Проверка на текущем этапе
 
 - `flutter pub get`: пройдено на Flutter 3.44.4 / Dart 3.12.2.
-- `flutter analyze`: пройдено без замечаний после реализации.
-- `flutter test test/dart/ad_lifecycle_contract_test.dart`: 8/8 пройдено; покрыты retry и timeout loader, cancel/destroy pending operation и безопасные пресеты.
-- Android Native API сверен через `javap` с точным `mobileads-8.3.0.aar`. Example переведён на `path: ../`; `flutter build apk --debug` успешно собрал текущий форк в `example/build/app/outputs/flutter-apk/app-debug.apk` (188959343 байта). Изолированный plugin-модуль без Flutter embedding по-прежнему не используется как критерий.
-- iOS API сверен с headers SDK 8.3.0. Swift type-check, Xcode build и iOS runtime на Windows не выполнялись.
+- `flutter analyze` корня и `example`: пройдено без замечаний.
+- `flutter test`: 17/17 пройдено. Добавлены регрессии на зависавшие `load`, на видимость managed-баннера в списке, на монтирование PlatformView и на освобождение ресурсов без нативного канала.
+- Android: `flutter build apk --debug` собирает example из текущего форка, Kotlin-слой перекомпилируется вместе с ним, поэтому сигнатуры Android SDK 8.3.0 подтверждены компиляцией.
+- iOS: Swift не компилировался и не может быть скомпилирован на Windows. Native Ads iOS до этого этапа содержали блокирующие ошибки доступа к типам и изоляции, исправленные статически; API сверен с публичной документацией SDK 8 и примерами `yandex-ads-sdk-ios`. Сборка Xcode обязательна перед любым использованием.
 - Example содержит экраны Native Ads и managed banner с безопасными пресетами и официальным test unit `demo-native-content-yandex`.
-- Flutter 3.44.4 предупреждает о будущем отказе от legacy Kotlin Gradle Plugin. Корректное снятие warning для plugin требует поднять минимум до Flutter 3.44 / Dart 3.12, а полный Built-in Kotlin example — Flutter 3.47+; текущая версия сохраняет утверждённый минимум Flutter 3.27.
-- Реальный Android/iOS placement, рекламный ответ, impression/click и integration indicator требуют device smoke-test; успешная APK-сборка их не доказывает.
+- Flutter 3.44.4 предупреждает о будущем отказе от legacy Kotlin Gradle Plugin; минимум форка остаётся 3.27, поэтому managed-баннер использует `TickerMode.of` вместо `valuesOf`.
+- Реальный Android/iOS placement, рекламный ответ, impression/click, перепривязка кэшированного объявления и фактическая высота шаблона требуют device smoke-test; успешная APK-сборка их не доказывает.
