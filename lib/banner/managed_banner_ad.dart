@@ -65,9 +65,8 @@ class ManagedBannerAdController extends ChangeNotifier {
 
   /// Share of the placement that must be on screen for it to count as seen.
   ///
-  /// Buyers pay for impressions the user could actually see, so the refresh
-  /// clock only runs while at least this much of the banner is visible. The
-  /// default of 0.5 follows the common display viewability bar.
+  /// The refresh clock runs only above it. The default of 0.5 follows the
+  /// common display viewability bar.
   final double visibilityThreshold;
 
   Duration get refreshInterval => refreshPolicy.refreshInterval;
@@ -135,9 +134,6 @@ class ManagedBannerAdController extends ChangeNotifier {
   double get visibleFraction => _visibleFraction;
 
   /// Time this placement spent above [visibilityThreshold].
-  ///
-  /// Report it next to impressions to see how much of the inventory was
-  /// actually viewable.
   Duration get viewableDuration {
     final since = _visibleSince;
     if (!_visible || since == null) return _viewableDuration;
@@ -149,8 +145,7 @@ class ManagedBannerAdController extends ChangeNotifier {
 
   /// Reports how much of the placement is on screen.
   ///
-  /// The widget calls this after every frame; call it yourself only when the
-  /// placement lives outside [ManagedBannerAdWidget].
+  /// [ManagedBannerAdWidget] calls it after every frame.
   void setVisibleFraction(double fraction) {
     if (_destroyed) return;
     _visibleFraction = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
@@ -283,8 +278,7 @@ class ManagedBannerAdController extends ChangeNotifier {
     }
   }
 
-  /// Recovers the refresh cycle when the native side accepts a request and
-  /// then never reports back.
+  /// Recovers the refresh cycle when a request is accepted and never answered.
   void _startLoadWatchdog() {
     _loadWatchdog?.cancel();
     if (_destroyed || !_loading) return;
@@ -427,7 +421,6 @@ class _ManagedBannerAdWidgetState extends State<ManagedBannerAdWidget>
     final bounds = renderObject.localToGlobal(Offset.zero) & size;
     var visible = bounds.intersect(Offset.zero & MediaQuery.of(context).size);
 
-    // Every scroll view above the placement clips it, not only the closest.
     RenderObject? ancestor = renderObject.parent;
     while (ancestor != null) {
       if (ancestor is RenderBox) {

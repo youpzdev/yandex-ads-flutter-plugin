@@ -13,19 +13,15 @@ part of '../mobile_ads.dart';
 
 /// Shows an app open ad when the user comes back to the app.
 ///
-/// The controller keeps an ad preloaded, so the return is not spent waiting
-/// for the network, and it refuses to show in the cases that make users
-/// uninstall: right after a permission dialog, on top of another full-screen
-/// ad, and when the user only left to follow an ad click.
+/// Keeps an ad preloaded and refuses to show after a system dialog, on top of
+/// another full-screen ad, and when the user left to follow an ad click.
 class AppOpenAdController with WidgetsBindingObserver {
   /// Ad request used for every app open ad.
   final AdRequest adRequest;
 
   /// How long the app must stay in the background before a return counts.
   ///
-  /// Shorter absences are usually system dialogs — a permission prompt, the
-  /// share sheet, a photo picker — and an ad on top of those is a bug, not
-  /// revenue.
+  /// Shorter absences are usually system dialogs.
   final Duration minimumBackgroundDuration;
 
   /// How long a return may wait for an ad that is still loading.
@@ -76,10 +72,7 @@ class AppOpenAdController with WidgetsBindingObserver {
     }
   }
 
-  /// Outcome of every show this controller attempted.
-  ///
-  /// Blocked and unavailable attempts are reported too: they are the numbers
-  /// that explain a placement that earns less than it should.
+  /// Outcome of every show this controller attempted, refusals included.
   Stream<AdShowOutcome> get shows => _shows.stream;
 
   /// The preloading pool, exposed for state and metrics.
@@ -101,11 +94,6 @@ class AppOpenAdController with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     await _pool.start();
     if (showOnColdStart) {
-      // The launch show is the point of a cold start ad, so it is the one
-      // show allowed to skip the startup grace. It is not awaited: start()
-      // must not block the caller for the length of an ad. Watch [shows] for
-      // the outcome, and call start() only after the user's consent answer is
-      // known.
       unawaited(showIfAllowed(waitFor: waitForAd, ignoreStartupGrace: true));
     }
   }
@@ -118,8 +106,6 @@ class AppOpenAdController with WidgetsBindingObserver {
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
         _backgroundedAt = _clock();
-        // Leaving after an ad was clicked, or while one owns the screen, means
-        // the user followed the ad rather than ended the session.
         _suppressNextResume = _AdActivity.isShowing ||
             _showing ||
             _AdActivity.clickCount != _clicksAtResume;

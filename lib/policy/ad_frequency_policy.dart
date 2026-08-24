@@ -62,10 +62,8 @@ class AdFrequencyDecision {
 
 /// How often a full-screen ad may be shown.
 ///
-/// Interstitials earn less per user when they are shown too often: the session
-/// gets shorter, retention drops and the placement loses the impressions it
-/// would have earned tomorrow. The caps here are the plugin's own policy and
-/// do not replace the rules of the ad network.
+/// These caps are a policy of this plugin and do not replace the rules of the
+/// ad network.
 class AdFrequencyPolicy {
   /// One ad every 3 minutes, at most 6 an hour and 20 a day.
   static const standard = AdFrequencyPolicy();
@@ -113,11 +111,8 @@ class AdFrequencyPolicy {
 
   /// How much the length of the previous ad extends the gap after it.
   ///
-  /// The plugin cannot shorten an ad or change how it is closed: the close
-  /// button and its countdown belong to the ad SDK and the creative. It can
-  /// make an expensive show cost more silence — with the default factor of 2,
-  /// a 30 second ad pushes the next one 60 seconds further away, while a
-  /// creative that closes in 3 seconds barely moves it. Set 0 to disable.
+  /// With the default factor of 2 a 30 second ad pushes the next show 60
+  /// seconds further away. Set 0 to disable.
   final double durationPenalty;
 
   const AdFrequencyPolicy({
@@ -181,7 +176,6 @@ class AdFrequencyGate {
     policy.validate();
     final now = _clock();
     _sessionStart = sessionStart ?? now;
-    // A timestamp from the future would block every show until it passes.
     _shows.removeWhere((show) => show.isAfter(now));
     _shows.sort();
     _forget(now);
@@ -209,8 +203,6 @@ class AdFrequencyGate {
   }
 
   /// Records how long the ad that was just shown held the screen.
-  ///
-  /// A long ad costs the user more, so it earns a longer gap after it.
   void noteShowDuration(Duration duration) {
     _lastShowDuration = duration.isNegative ? Duration.zero : duration;
   }
@@ -268,10 +260,9 @@ class AdFrequencyGate {
         const AdFrequencyDecision.allowed();
   }
 
-  /// Records a show that actually reached the user.
+  /// Records a show that reached the user.
   ///
-  /// Call it when the ad was displayed, not when it was loaded: a request that
-  /// never became an impression must not consume the cap.
+  /// A request that never became an impression must not consume the cap.
   void recordShow([DateTime? at]) {
     final moment = at ?? _clock();
     _shows.add(moment);
@@ -282,9 +273,8 @@ class AdFrequencyGate {
 
   /// The history in a form that survives an app restart.
   ///
-  /// Daily caps only mean something when the history outlives the process, so
-  /// persist this map and hand it back to [AdFrequencyGate.fromJson] on the
-  /// next launch. It contains no user data — only the moments ads were shown.
+  /// Persist it and restore with [AdFrequencyGate.fromJson] so daily caps keep
+  /// their meaning. It holds show timestamps and nothing else.
   Map<String, Object?> toJson() => {
         'shows': _shows
             .map((show) => show.toUtc().millisecondsSinceEpoch)
@@ -293,10 +283,8 @@ class AdFrequencyGate {
 
   /// Restores a gate from [toJson].
   ///
-  /// Timestamps that are unreadable or in the future are dropped rather than
-  /// trusted. This guards a clock that is already wrong at startup; a clock
-  /// moved forward while the app runs still ages the history out, because the
-  /// gate has no monotonic time source.
+  /// Unreadable and future timestamps are dropped. A clock moved forward while
+  /// the app runs still ages the history out: there is no monotonic source.
   static AdFrequencyGate fromJson(
     Map<String, Object?> json, {
     AdFrequencyPolicy policy = AdFrequencyPolicy.standard,

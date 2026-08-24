@@ -111,7 +111,6 @@ class YandexAds {
   static Future<void> setUserConsent(bool value) async {
     await _channel.invokeMethod('setUserConsent', value);
     _userConsent = value;
-    // Ads requested under the previous answer must not be shown any more.
     _AdConsent.invalidate();
   }
 

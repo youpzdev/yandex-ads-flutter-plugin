@@ -151,10 +151,7 @@ class NativeAd with _Ad {
 
   /// Requests the ad again for a recreated platform view.
   ///
-  /// A recreated view is a fresh native instance holding no ad, so whatever
-  /// the previous view loaded is gone. Requests are spaced by
-  /// [reloadInterval] so that scrolling a placement in and out cannot turn
-  /// into a burst of ad requests.
+  /// Requests are spaced by [reloadInterval].
   void _scheduleReload() {
     if (isDestroyed || _nativeLoadArguments == null) return;
     _reloadTimer?.cancel();
@@ -332,7 +329,7 @@ class NativeAd with _Ad {
         try {
           await super.destroy();
         } on MissingPluginException {
-          // The platform view was already disposed and released its channel.
+          _finalizer.detach(this);
         }
       } else {
         _destroyed = true;

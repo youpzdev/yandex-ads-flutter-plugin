@@ -50,7 +50,6 @@ final class NativeAdViewFactory: NSObject, FlutterPlatformViewFactory {
 
         let releaseChannels = { [weak self] in
             guard let self, self.viewGenerations[id] == generation else { return }
-            // A replacement platform view may already own these channel names.
             self.viewGenerations.removeValue(forKey: id)
             methodChannel.setMethodCallHandler(nil)
             eventChannel.setStreamHandler(nil)
@@ -61,8 +60,6 @@ final class NativeAdViewFactory: NSObject, FlutterPlatformViewFactory {
         methodChannel.setMethodCallHandler { [weak nativeAdView] call, result in
             Task { @MainActor in
                 guard let nativeAdView else {
-                    // Flutter released the view without a Dart destroy: answer
-                    // teardown calls and give the channel names back.
                     if call.method == "load" {
                         result(FlutterError(
                             code: "disposed",

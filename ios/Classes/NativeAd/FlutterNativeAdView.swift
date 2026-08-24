@@ -280,8 +280,6 @@ private final class NativeAdEventRelay: NSObject, @preconcurrency FlutterStreamH
     }
 
     func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        // Queued events outlive a resubscription: the view may have already
-        // reported its outcome before Dart attached the new listener.
         sink = nil
         return nil
     }

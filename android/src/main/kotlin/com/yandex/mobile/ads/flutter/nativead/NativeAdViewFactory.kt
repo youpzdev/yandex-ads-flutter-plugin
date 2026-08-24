@@ -47,7 +47,6 @@ internal class NativeAdViewFactory(
         val disposeChannels = {
             if (!channelsDisposed) {
                 channelsDisposed = true
-                // A replacement platform view may already own the channel names.
                 if (activeViews[id] === nativeAdView) {
                     activeViews.remove(id)
                     methodChannel.setMethodCallHandler(null)

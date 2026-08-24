@@ -12,9 +12,6 @@
 part of '../mobile_ads.dart';
 
 /// Tracks whether a full-screen ad owns the screen right now.
-///
-/// An app open ad must not appear on top of an interstitial, and returning
-/// from an ad click must not look like a fresh app launch.
 class _AdActivity {
   static int _visibleCount = 0;
   static DateTime? _endedAt;
@@ -24,8 +21,7 @@ class _AdActivity {
 
   /// Claims the screen for one full-screen ad, or refuses.
   ///
-  /// Claiming happens before the first await, so two pools — or two calls on
-  /// one pool — cannot both pass the check and then both show.
+  /// Synchronous on purpose: two pools must not both pass the check.
   static bool tryBegin() {
     if (_visibleCount > 0) return false;
     _visibleCount++;
@@ -35,9 +31,6 @@ class _AdActivity {
   static DateTime? get lastShowEndedAt => _endedAt;
 
   /// How many ads of any format were clicked in this process.
-  ///
-  /// A counter rather than a timestamp: it needs no clock, so a comparison
-  /// stays correct no matter which clock the caller uses.
   static int get clickCount => _clickCount;
 
   static void noteClick() => _clickCount++;
@@ -141,12 +134,6 @@ class AdShowOutcome {
   final Reward? reward;
 
   /// How long the ad held the screen, from show to dismissal.
-  ///
-  /// The plugin cannot change how an ad is closed — the close button, its
-  /// countdown and the sound control belong to the Yandex Mobile Ads SDK and
-  /// to the creative. What it can do is measure the cost: a placement whose
-  /// ads run for half a minute deserves a longer gap than one that closes in
-  /// three seconds.
   final Duration? duration;
 
   const AdShowOutcome._(
@@ -198,17 +185,12 @@ class _PoolSlot {
 
 /// Keeps full-screen ads loaded before they are needed.
 ///
-/// A placement that requests an ad at the moment it wants to show it makes the
-/// user wait for the network, and every second of that wait is a show that
-/// does not happen. The pool loads ahead of time, replaces ads that went
-/// stale, spaces failed requests with [AdRetryPolicy] and can enforce an
-/// [AdFrequencyPolicy] on the shows themselves.
+/// Loads ahead of time, replaces stale ads, spaces failed requests with
+/// [AdRetryPolicy] and can apply an [AdFrequencyPolicy] to the shows.
 class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
-  /// Ads older than this are dropped instead of shown.
+  /// Ads older than this are replaced instead of shown.
   ///
-  /// This is the plugin's own ceiling, not a guarantee from the ad network:
-  /// a creative that sat in memory for an hour is likely to be refused or to
-  /// perform badly, so the pool replaces it.
+  /// A limit of this plugin, not a guarantee from the ad network.
   static const defaultTimeToLive = Duration(minutes: 45);
 
   final AdRequest adRequest;
@@ -222,10 +204,7 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
   /// Deadline for a single load request.
   final Duration loadTimeout;
 
-  /// Deadline for a single show.
-  ///
-  /// A native layer that dies without closing its event channel would
-  /// otherwise leave the plugin believing an ad still owns the screen.
+  /// Deadline for a single show, in case the native side never answers.
   final Duration showTimeout;
 
   /// How failed requests are repeated.
@@ -412,8 +391,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
 
   /// Current pool state.
   FullscreenAdPoolState get state {
-    // Expiry is checked first so that the status cannot claim a ready ad the
-    // very same snapshot reports as gone.
     final available = availableCount;
     return FullscreenAdPoolState(
       status: _status,
@@ -466,9 +443,7 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
 
   /// Starts keeping the pool filled.
   ///
-  /// Returns as soon as the first request is on its way: waiting here would
-  /// block the caller for the whole network round trip, which is exactly what
-  /// preloading exists to avoid. Watch [states] or [isReady] for progress.
+  /// Returns once the first request is on its way; watch [states] for progress.
   Future<void> start() async {
     _ensureAlive();
     if (_started) return;
@@ -490,7 +465,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
       }
       return;
     }
-    // A backgrounded app must not keep asking for inventory it cannot show.
     if (_retryTimer != null) {
       _retryTimer!.cancel();
       _retryTimer = null;
@@ -509,7 +483,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
 
     var slot = _takeSlot();
     if (slot == null && waitFor != null && waitFor > Duration.zero) {
-      // Ask before waiting: nothing may be in flight at all.
       unawaited(_fill());
       await _waitForSlot(waitFor);
       slot = _takeSlot();
@@ -521,9 +494,8 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
 
   /// Shows the next ad, applying the frequency policy.
   ///
-  /// The pool sets the event listener, shows the ad, waits for the dismissal
-  /// and destroys it, so a placement cannot leak a shown ad. Callbacks are
-  /// forwarded to the caller.
+  /// The pool sets the listener, shows the ad, waits for the dismissal and
+  /// destroys it. Callbacks are forwarded to the caller.
   Future<AdShowOutcome> showNext({
     Duration? waitFor,
     bool ignoreStartupGrace = false,
@@ -542,8 +514,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
       }
     }
 
-    // The screen is claimed here, synchronously, so no other pool and no
-    // second call can slip between this check and the actual show.
     if (!_AdActivity.tryBegin()) {
       return const AdShowOutcome._(AdShowStatus.alreadyShowing);
     }
@@ -621,7 +591,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     } finally {
       onScreen.stop();
       gate?.noteShowDuration(onScreen.elapsed);
-      // Releasing a shown ad must never replace its outcome with an error.
       try {
         await fullscreen.destroy();
       } catch (_) {}
@@ -691,9 +660,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
   }
 
   /// Waits until a slot is free, or [timeout] elapses.
-  ///
-  /// A single load wakes every waiter, so a waiter that lost the race keeps
-  /// waiting for the rest of its own deadline instead of giving up early.
   Future<void> _waitForSlot(Duration timeout) async {
     final elapsed = Stopwatch()..start();
     while (!_destroyed) {
@@ -742,8 +708,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     try {
       while (!_destroyed && _slots.length < capacity) {
         try {
-          // The answer this request gets belongs to the consent it was sent
-          // with, not to the one that happens to be current when it arrives.
           final requestedConsent = _AdConsent.generation;
           final ad = await _load(loadTimeout);
           if (_destroyed) {
@@ -788,7 +752,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     if (_observing &&
         lifecycle != null &&
         lifecycle != AppLifecycleState.resumed) {
-      // Retry when the user is back: inventory cannot be shown in background.
       _retryPending = true;
       _publish();
       return;
@@ -828,8 +791,6 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     final consent = _AdConsent.generation;
     final expired = <_PoolSlot>[];
     _slots.removeWhere((slot) {
-      // An ad requested under a consent the user has since changed must not
-      // be shown, however fresh it is.
       final isExpired = now.difference(slot.loadedAt) >= timeToLive ||
           slot.consentGeneration != consent;
       if (isExpired) expired.add(slot);

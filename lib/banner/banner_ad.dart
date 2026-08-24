@@ -185,7 +185,7 @@ class BannerAd with _Ad {
         try {
           await super.destroy();
         } on MissingPluginException {
-          // The platform view was already disposed and released its channel.
+          _finalizer.detach(this);
         }
       } else {
         _destroyed = true;
@@ -243,7 +243,6 @@ class _AdWidgetState extends State<AdWidget> {
   void _listenToLoadState() {
     _subscription = widget.bannerAd.loadStateStream.listen((state) {
       if (!mounted) return;
-      // Every state can be the first one that has a platform view to show.
       setState(() {
         if (state is BannerAdLoadStateLoaded) {
           _width = state.width;

@@ -86,8 +86,6 @@ class _FullScreenAdEventListener {
             onAdImpression?.call(impressionData);
             break;
           case _FullScreenAdCallbackName.onRewarded:
-            // One view grants one reward. A client callback is not proof of
-            // anything anyway: verify valuable rewards on your own server.
             if (_rewardGranted) break;
             _rewardGranted = true;
             reward = Reward._(result['type'], result['amount']);
@@ -131,7 +129,6 @@ class _FullScreenAdEventListener {
 
   void _completeTerminal(Map<dynamic, dynamic> result) {
     if (_terminalEvent.isCompleted) return;
-    // The subscription stays alive: impressions can still follow a dismissal.
     _terminalEvent.complete(result);
   }
 

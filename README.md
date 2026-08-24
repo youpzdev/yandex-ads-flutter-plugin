@@ -1,29 +1,75 @@
-# Yandex Mobile Ads Flutter Plugin — maintained fork
+# yandex_mobileads — fork
 
-Flutter plugin for the Yandex Ads SDK. The plugin allows Flutter developers to integrate the Yandex Ads SDK into Android and iOS apps.
+A fork of the Flutter plugin for the Yandex Mobile Ads SDK 8.3.0.
 
-This repository is a source-compatible fork of `yandex_mobileads` 8.3.0. It adds
-awaitable lifecycle operations, managed banner refresh and SDK-bound Native Ads
-for Android and iOS. The package still reports upstream SDK/plugin compatibility
-as 8.3.0; use a Git or local path dependency until the licensing question in
-[`docs/project-state.md`](docs/project-state.md) is resolved.
+Русская версия: [README.ru.md](README.ru.md)
 
-Two upstream behaviors changed on purpose. `BannerAd.load` now completes only
-after the native side accepts the request, which requires the matching
-`AdWidget` to be mounted, and it fails with `TimeoutException` after its
-`timeout` instead of never returning. Overlapping `load` calls on the same
-banner throw `StateError` rather than racing each other. Code that loaded a
-banner before displaying its widget has to mount the widget first, or pass a
-timeout it is willing to wait for.
+The upstream API still works. On top of it this fork fixes the ad lifecycle,
+adds preloading and pacing for full-screen formats, adds Native Ads for Android
+and iOS, and reports every ad event through one stream.
 
-## Fork extensions
+## Install
 
-### Preloaded full-screen ads
+The fork is not published to pub.dev — see [License](#license). Use a path or a
+git dependency:
 
-`FullscreenAdPool` keeps interstitial, rewarded and app open ads loaded before
-the moment they are needed, so a show does not begin with a network round trip.
-It replaces creatives that went stale, spaces failed requests with exponential
-backoff and jitter, and displays an ad without leaking it.
+```yaml
+dependencies:
+  yandex_mobileads:
+    path: ../yandex-mobile-ads-fork
+```
+
+Requires Flutter 3.27 or newer.
+
+## Quick start
+
+```dart
+await YandexAds.initialize();
+```
+
+### Banner
+
+Mount the widget, then load. `load` waits for the native side to accept the
+request, so the widget has to be in the tree; it fails with `TimeoutException`
+after `timeout` (30 seconds by default) instead of waiting forever.
+
+```dart
+final banner = BannerAd(adSize: const BannerAdSize.sticky(width: 320));
+
+// In build():
+AdWidget(bannerAd: banner)
+
+await banner.load(const AdRequest(adUnitId: 'demo-banner-yandex'));
+await banner.destroy();
+```
+
+Overlapping `load` calls on the same banner throw `StateError`.
+
+### Banner that refreshes itself
+
+`ManagedBannerAdController` reloads the banner only while it is really on
+screen and the app is in the foreground.
+
+```dart
+final controller = ManagedBannerAdController(
+  adSize: const BannerAdSize.inline(width: 320, maxHeight: 100),
+  adRequest: const AdRequest(adUnitId: 'demo-banner-yandex'),
+  refreshPolicy: ManagedBannerRefreshPolicy.standard, // 60 s
+);
+
+// In build():
+ManagedBannerAdWidget(controller: controller)
+```
+
+Visibility is the share of the placement on screen, clipped by the window and
+by every scroll view above it. The refresh clock runs only above
+`visibilityThreshold` (0.5 by default). The controller also reports
+`visibleFraction`, `viewableDuration` and `requestCount`.
+
+### Full-screen ads
+
+`FullscreenAdPool` keeps interstitial, rewarded or app open ads loaded, so a
+show does not start with a network round trip.
 
 ```dart
 final pool = FullscreenAdPool.interstitial(
@@ -34,134 +80,71 @@ final pool = FullscreenAdPool.interstitial(
 
 await pool.start();
 
-// At the placement:
 final outcome = await pool.showNext(waitFor: const Duration(seconds: 3));
-if (outcome.status == AdShowStatus.blocked) {
-  // outcome.frequency tells which cap held the show back and for how long.
+switch (outcome.status) {
+  case AdShowStatus.shown:        // outcome.duration, outcome.reward
+  case AdShowStatus.blocked:      // outcome.frequency explains why and for how long
+  case AdShowStatus.unavailable:  // nothing was ready in time
+  case AdShowStatus.alreadyShowing:
+  case AdShowStatus.failed:       // outcome.error
 }
 
 await pool.destroy();
 ```
 
-`acquire` is available when the placement wants to own the ad itself; the
-caller then has to destroy it.
+The pool sets the listener, shows the ad, waits for the dismissal and destroys
+it, so a placement cannot leak a shown ad. Use `acquire` instead if the
+placement wants to own the ad itself; then it must destroy it.
 
-The pool refuses a second show while one is on screen (`AdShowStatus
-.alreadyShowing`), returns the reserved cap when a show fails, and drops ads
-that were requested before `setUserConsent` or `setAgeRestricted` changed the
-answer. After the retry budget is used up the pool stops requesting and reports
-`FullscreenAdPoolStatus.exhausted` until `retry()` is called; while the app is
-in the background retries are held instead of firing.
+Other behaviour worth knowing:
 
-### Choosing how an ad is dismissed
-
-The close button of a full-screen ad is drawn by the Yandex Mobile Ads SDK and
-the creative. `InterstitialAd` exposes exactly three members — `getAdInfo`,
-`setAdEventListener` and `show` — so there is no API in the SDK, and no setting
-in the ad unit, that moves the close button, shortens its countdown or removes
-the forced view. A plugin cannot add one.
-
-What is a real choice is the format. An app open ad is dismissed immediately
-through its own return control, while an interstitial may hold the screen for
-the length of the creative. If a placement needs an instant exit, use
-`FullscreenAdPool.appOpen` for it; the example screen "Preloaded full-screen"
-switches between both so the difference can be seen on a device.
-
-Keep in mind what the format is sold as: an app open ad is meant for opening or
-returning to the app. Using it as a mid-session interstitial is a decision for
-the publisher to make with its ad network, not something this plugin decides.
-
-Whatever the format, `AdShowOutcome.duration` reports how long the ad held the
-screen, and `AdFrequencyPolicy.durationPenalty` turns that length into a longer
-gap before the next one: with the default factor of 2, a 75 second ad pushes
-the next show 150 seconds further away.
+* only one full-screen ad at a time, across every pool in the process;
+* stale ads are replaced (`timeToLive`), failed requests are repeated with a
+  growing delay and jitter (`AdRetryPolicy`), and retries pause while the app
+  is in the background;
+* when the retry budget runs out the pool reports
+  `FullscreenAdPoolStatus.exhausted` and waits for `retry()`;
+* ads requested before `setUserConsent` or `setAgeRestricted` changed the
+  answer are dropped instead of shown.
 
 ### Pacing
 
 `AdFrequencyPolicy` limits how often a full-screen ad may appear: a minimum
-gap between shows, rolling hourly and daily caps, a session cap and a startup
-grace period. `AdFrequencyGate` applies the policy, explains every refusal and
-exposes `showTimestamps` so the history can be persisted between launches.
+gap, rolling hourly and daily caps, a session cap and a startup grace period.
+Presets: `conservative`, `standard`, `engaged`, `unlimited`.
 
-Presets are `conservative`, `standard`, `engaged` and `unlimited`. Only shows
-that reached the user consume a cap.
+```dart
+final gate = AdFrequencyGate(policy: AdFrequencyPolicy.standard);
 
-Daily caps only mean something across launches, so persist `gate.toJson()` and
-restore it with `AdFrequencyGate.fromJson`. The payload holds show timestamps
-and nothing else.
+if (gate.evaluate().isAllowed) { /* ... */ }
+```
+
+Only shows that reached the user consume a cap. Persist `gate.toJson()` and
+restore it with `AdFrequencyGate.fromJson` so daily caps survive a restart; the
+payload holds show timestamps and nothing else.
+
+`durationPenalty` turns the length of an ad into a longer gap after it: with
+the default factor of 2, a 30 second video pushes the next show 60 seconds
+further away.
 
 ### App open ads
-
-`AppOpenAdController` preloads an app open ad and shows it when the user comes
-back, while refusing the returns that make apps get uninstalled: a background
-shorter than `minimumBackgroundDuration` (a permission dialog, a share sheet),
-a return from an ad click, and a return on top of another full-screen ad.
 
 ```dart
 final appOpen = AppOpenAdController(
   adRequest: const AdRequest(adUnitId: 'demo-appopenad-yandex'),
   frequencyPolicy: AdFrequencyPolicy.conservative,
 );
+
+appOpen.shows.listen((outcome) => print(outcome.status));
 await appOpen.start();
-appOpen.shows.listen((outcome) => log('app open: ${outcome.status}'));
 ```
 
-Call `start()` only after the user's consent answer is known: it preloads and,
-with `showOnColdStart`, shows the launch ad. `start()` returns immediately —
-the outcome of every attempt, including refusals, arrives on `shows`.
+`start()` returns immediately; call it after the user's consent answer is
+known. The controller does not show an ad after a background shorter than
+`minimumBackgroundDuration` (a permission dialog, a share sheet), after a click
+on any ad, or on top of another full-screen ad.
 
-### Ad events
-
-`YandexAds.events` reports the lifecycle of every ad the plugin creates —
-loads, failures, impressions, clicks, dismissals and rewards — with the ad
-unit and the impression payload that carries revenue data.
-
-```dart
-YandexAds.events.listen((event) {
-  analytics.log(event.type.name, {
-    'format': event.format.name,
-    'adUnitId': event.adUnitId,
-  });
-});
-```
-
-The stream is local to the app: the plugin never sends these events anywhere.
-
-### Managed banner refresh
-
-`ManagedBannerAdController` refreshes only while its widget is visible and the
-application is resumed. It prevents overlapping loads and pauses the interval
-outside visible time. The existing `BannerAd` remains manual and unchanged.
-
-Visibility is measured as the share of the placement on screen, clipped by both
-the window and the surrounding scroll view. The refresh clock runs only above
-`visibilityThreshold` (0.5 by default), and the controller reports
-`visibleFraction` and the accumulated `viewableDuration` for reporting.
-
-```dart
-late final managedBanner = ManagedBannerAdController(
-  adSize: const BannerAdSize.inline(width: 320, maxHeight: 100),
-  adRequest: const AdRequest(adUnitId: 'demo-banner-yandex'),
-  refreshPolicy: ManagedBannerRefreshPolicy.standard,
-);
-
-// In build():
-ManagedBannerAdWidget(controller: managedBanner)
-
-// Await from the owning State/service when the placement is retired:
-await managedBanner.destroy();
-```
-
-Refresh presets are `conservative` (120 seconds), `standard` (60 seconds) and
-`engaged` (30 seconds). Custom refresh and retry intervals shorter than 30
-seconds are rejected. Reloading keeps the placement footprint stable, but the
-current implementation does not maintain two simultaneous banner instances to
-guarantee that the previous creative remains visible during replacement.
-
-### Native Ads
-
-Native Ads use a native SDK-bound template view, so required assets, feedback,
-media and click handling stay under Yandex Mobile Ads SDK control.
+### Native ads
 
 ```dart
 final nativeAd = NativeAd(
@@ -172,78 +155,103 @@ final nativeAd = NativeAd(
   style: NativeAdStyle.brandSafe,
 );
 
-// Mount this first; load() also has a timeout that covers waiting for the view.
+// In build():
 NativeAdWidget(nativeAd: nativeAd)
 
 await nativeAd.load();
-
-// When the placement is retired:
 await nativeAd.destroy();
 ```
 
-Available template minimums are:
+The native SDK binds the assets, the media view, the feedback button and the
+clicks. Minimum container sizes are computed from the template and the content
+padding — 324 × 412 for `compact` and 324 × 432 for `media` at the default
+padding; use `minimumWidthFor` and `minimumHeightFor` when you change it. If
+the loaded creative still needs more room, the ad is not shown and
+`onAdFailedToLoad` reports the size it actually needs.
 
-| Template | Minimum logical size | Media height |
-| --- | ---: | ---: |
-| `compact` | 324 × 412 | 160 |
-| `media` | 324 × 432 | 180 |
+When Flutter recreates the platform view — scrolling far out of a list and back
+— the ad is requested again for the new view, at most once per
+`NativeAd.reloadInterval` (30 seconds).
 
-Both templates reserve a media width of at least 300 logical pixels, 64 × 64
-interactive assets and three metadata lines. A larger `contentPadding` raises
-the minimum on every layer: use `NativeAdTemplate.minimumWidthFor` and
-`minimumHeightFor` instead of the constants above when you change padding.
+### Ad events
 
-If the loaded creative still needs more room than the container, the ad is not
-displayed and `onAdFailedToLoad` reports the size the bound content actually
-requires. The built-in style presets are `light`, `dark` and `brandSafe`; a
-custom `NativeAdStyle` may override bounded colors, corner radius and padding.
-A load timeout sends `cancelLoading` to native code and suppresses late
-callbacks.
+```dart
+YandexAds.events.listen((event) {
+  analytics.log(event.type.name, {
+    'format': event.format.name,
+    'adUnitId': event.adUnitId,
+  });
+});
+```
 
-A native ad survives its platform view: when Flutter recreates the view (for
-example after scrolling far out of a list and back), the ad is requested again
-for the new view, because the previous native view took its ad with it.
-Requests a `NativeAd` makes on its own are spaced by
-`NativeAd.reloadInterval` (30 seconds), so scrolling a placement in and out
-cannot turn into a burst of ad requests.
+One stream for banners, full-screen formats and native ads: loads, failures,
+impressions, clicks, dismissals and rewards. Events are delivered live and
+never buffered, so subscribe before creating the first ad. `impressionData`
+carries revenue figures — treat it as commercial data. The plugin sends these
+events nowhere.
 
-### Lifecycle behavior
+## How an ad is closed
 
-- SDK initialization can be retried after a platform failure.
-- Full-screen loader timeouts cover SDK initialization, loader creation and the
-  native request. Cancel and destroy complete pending Dart futures.
-- `show()` and `destroy()` are awaitable. Full-screen ads expose terminal
-  dismissal/failure state without leaking unhandled async errors.
-- Destroy operations are idempotent; using a destroyed ad or loader fails
-  explicitly.
+The close button, its countdown and the sound control are drawn by the Yandex
+Mobile Ads SDK and by the creative. `InterstitialAd` exposes three members —
+`getAdInfo`, `setAdEventListener` and `show` — so neither this plugin nor the
+ad unit settings can move the button, shorten the countdown or remove a forced
+view.
 
-See [`docs/decision-log.md`](docs/decision-log.md) for the decisions and rejected
-alternatives behind these contracts.
+What is a choice is the format: an app open ad is dismissed at once through its
+own return control, an interstitial may hold the screen for the length of the
+creative. The example app has a screen that switches between both preloaded
+formats so the difference can be seen on a device. Note that an app open ad is
+sold as advertising for opening or returning to the app; using it as a
+mid-session interstitial is a decision for the publisher and its ad network.
 
-## Documentation
+## What this fork changes
 
-Documentation can be found on the [official website] [DOCUMENTATION]
+* Every operation is awaitable and finishes: `load`, `show`, `cancelLoading`,
+  `destroy` and initialization. Pending loads end with an error, cancellation
+  and timeouts are real, and releasing resources is idempotent.
+* Android reported a failed show as a successful one — the constant for
+  `onAdFailedToShow` carried the wrong name. Fixed.
+* A load that answers after its timeout no longer leaves a native ad and its
+  channels alive.
+* Banner and native ad loads can no longer hang forever waiting for a widget
+  that never appears.
+* Reward callbacks are delivered once per view. A client callback is not proof
+  of a view: verify valuable rewards on your own server.
+* `mavenLocal()` no longer outranks Google and Maven Central when resolving the
+  native SDK.
+* Added: `FullscreenAdPool`, `AdFrequencyPolicy`, `AppOpenAdController`,
+  `NativeAd`, `ManagedBannerAdController`, `YandexAds.events`.
+
+Full list: [CHANGELOG.md](CHANGELOG.md).
+
+## Limits and what is not verified
+
+* iOS is not compiled: the fork was developed on Windows. The Swift sources
+  were reviewed statically and checked against the SDK 8 documentation and the
+  official examples, but an Xcode build is required before trusting them.
+* Android is verified by building and running the example app on a device;
+  real fill, impressions and clicks on production ad units are not.
+* Moving the system clock forward ages the frequency history out — the gate has
+  no monotonic time source.
+* A banner covered by another widget inside the same screen still counts as
+  visible; dialogs and route changes are handled.
+* The package still reports version 8.3.0, same as upstream. Pin it by path or
+  git so a pub.dev resolution cannot silently replace it.
 
 ## License
 
-EULA is available at the [EULA website] [LICENSE]
+The published package archive contains Apache 2.0, while the official
+repository ships a separate Yandex Mobile Ads SDK agreement that restricts
+redistribution. The two are kept side by side in [LICENSE](LICENSE) and
+[LICENSE-PLUGIN-APACHE](LICENSE-PLUGIN-APACHE); distributing this fork or
+publishing it as a package needs that conflict resolved first.
 
-## Quick start in Android Studio / Visual Studio Code
-
-#### 1. Import project
-
-#### 2. Build and run
+The native SDK stays an external dependency and is covered by the
+[Yandex Mobile Ads SDK agreement](https://yandex.com/legal/mobileads_sdk_agreement/).
+Upstream documentation: <https://yandex.com/dev/mobile-ads/doc/intro/about.html>
 
 ## Integration
-
-### Configuring pubspec
-
-##### Add the YandexMobileAds SDK:
-
-```yaml
-dependencies:
-  yandex_mobileads: ^8.3.0
-```
 
 ### Mediation
 

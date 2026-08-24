@@ -13,9 +13,8 @@ part of '../mobile_ads.dart';
 
 /// How a failed ad request is repeated.
 ///
-/// A no-fill answer is normal and temporary, so a failed request is worth
-/// repeating — but only with a growing delay, otherwise a device without
-/// inventory keeps asking as fast as the network allows.
+/// No-fill is normal and temporary, so a failed request is repeated with a
+/// growing delay instead of as fast as the network allows.
 class AdRetryPolicy {
   /// Waits 5 seconds, then doubles up to 5 minutes, without giving up.
   static const standard = AdRetryPolicy();
@@ -49,8 +48,7 @@ class AdRetryPolicy {
 
   /// Number of attempts after which the request is abandoned.
   ///
-  /// `null` keeps retrying, which is the right default for a background
-  /// preload that has nothing better to do.
+  /// `null` keeps retrying while the app is in the foreground.
   final int? maximumAttempts;
 
   const AdRetryPolicy({
@@ -95,8 +93,7 @@ class AdRetryPolicy {
   /// Delay before the attempt that follows [failedAttempts] failures.
   ///
   /// [noise] spreads the result within [jitter] and is expected in the
-  /// `-1.0 ... 1.0` range; the caller supplies it so that the schedule stays
-  /// reproducible in tests.
+  /// `-1.0 ... 1.0` range.
   Duration delayAfter(int failedAttempts, {double noise = 0}) {
     final steps = failedAttempts <= 1 ? 0 : failedAttempts - 1;
     var micros = initialDelay.inMicroseconds.toDouble();

@@ -84,9 +84,6 @@ abstract class _FullscreenAdLoader {
 
     if (name == _FullScreenAdCallbackName.onAdLoaded.name) {
       if (completer == null) {
-        // The request was cancelled or timed out before this answer arrived.
-        // The native side has already built an ad and two channels for it, and
-        // nothing in Dart owns them any more, so release them here.
         unawaited(_discardOrphanAd(result['id'] as int?));
         return;
       }
@@ -260,7 +257,7 @@ abstract class _FullscreenAdLoader {
     try {
       await _channel.invokeMethod<void>('destroy');
     } on MissingPluginException {
-      // The native loader is already gone.
+      _finalizer.detach(this);
     }
   }
 
