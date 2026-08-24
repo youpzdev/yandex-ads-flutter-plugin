@@ -56,6 +56,12 @@ class HomePage extends StatelessWidget {
             onTap: () => Navigator.pushNamed(context, '/native'),
           ),
           ListTile(
+            leading: const Icon(Icons.bolt_outlined),
+            title: const Text('Preloaded interstitial with pacing'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.pushNamed(context, '/preloaded'),
+          ),
+          ListTile(
             leading: const Icon(Icons.fullscreen_outlined),
             title: const Text('Interstitial'),
             trailing: const Icon(Icons.chevron_right),

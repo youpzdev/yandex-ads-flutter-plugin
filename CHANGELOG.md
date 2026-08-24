@@ -2,6 +2,21 @@
 
 ## Unreleased — maintained fork
 
+### Added
+
+* `FullscreenAdPool` preloads interstitial, rewarded and app open ads, replaces
+  stale creatives, retries failed requests with exponential backoff and jitter,
+  and shows an ad without leaking it.
+* `AdFrequencyPolicy` and `AdFrequencyGate` cap how often a full-screen ad may
+  be shown, with a minimum interval, rolling hourly and daily caps, a session
+  cap and a startup grace period.
+* `AppOpenAdController` shows a preloaded app open ad on return from the
+  background and suppresses returns from system dialogs and ad clicks.
+* `YandexAds.events` reports every ad lifecycle event with its ad unit and
+  impression payload.
+* `ManagedBannerAdController.visibilityThreshold` measures the viewable share
+  of a banner and reports `visibleFraction` and `viewableDuration`.
+
 ### Behavior changes against upstream 8.3.0
 
 * `BannerAd.load` now completes only after the native side accepts the request,

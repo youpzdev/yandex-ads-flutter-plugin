@@ -38,6 +38,7 @@
 - Native Ads реализованы на Android и iOS через `<native-ad>` PlatformView, per-view method/event channels, SDK-bound assets и шаблоны `compact`/`media`. Минимумы считаются из шаблона и `contentPadding` одинаковой формулой на всех слоях: при стандартном отступе 324×412 (`compact`) и 324×432 (`media`).
 - Native load имеет timeout, `cancelLoading`, generation guard и очередь событий до готовности EventChannel. Поздний callback не показывает creative после отмены.
 - Добавлены светлый, тёмный и контрастный brand-safe стилевые пресеты.
+- Добавлен слой монетизации: пул предзагрузки full-screen форматов с TTL и backoff, частотные капы с объяснением отказа, app-open контроллер с подавлением ложных возвратов, измерение видимой доли баннера и единый поток `YandexAds.events` для аналитики.
 
 ## Этап
 

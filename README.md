@@ -18,11 +18,86 @@ timeout it is willing to wait for.
 
 ## Fork extensions
 
+### Preloaded full-screen ads
+
+`FullscreenAdPool` keeps interstitial, rewarded and app open ads loaded before
+the moment they are needed, so a show does not begin with a network round trip.
+It replaces creatives that went stale, spaces failed requests with exponential
+backoff and jitter, and displays an ad without leaking it.
+
+```dart
+final pool = FullscreenAdPool.interstitial(
+  adRequest: const AdRequest(adUnitId: 'demo-interstitial-yandex'),
+  capacity: 2,
+  frequencyGate: AdFrequencyGate(policy: AdFrequencyPolicy.standard),
+);
+
+await pool.start();
+
+// At the placement:
+final outcome = await pool.showNext(waitFor: const Duration(seconds: 3));
+if (outcome.status == AdShowStatus.blocked) {
+  // outcome.frequency tells which cap held the show back and for how long.
+}
+
+await pool.destroy();
+```
+
+`acquire` is available when the placement wants to own the ad itself; the
+caller then has to destroy it.
+
+### Pacing
+
+`AdFrequencyPolicy` limits how often a full-screen ad may appear: a minimum
+gap between shows, rolling hourly and daily caps, a session cap and a startup
+grace period. `AdFrequencyGate` applies the policy, explains every refusal and
+exposes `showTimestamps` so the history can be persisted between launches.
+
+Presets are `conservative`, `standard`, `engaged` and `unlimited`. Only shows
+that reached the user consume a cap.
+
+### App open ads
+
+`AppOpenAdController` preloads an app open ad and shows it when the user comes
+back, while refusing the returns that make apps get uninstalled: a background
+shorter than `minimumBackgroundDuration` (a permission dialog, a share sheet),
+a return from an ad click, and a return on top of another full-screen ad.
+
+```dart
+final appOpen = AppOpenAdController(
+  adRequest: const AdRequest(adUnitId: 'demo-appopenad-yandex'),
+  frequencyPolicy: AdFrequencyPolicy.conservative,
+);
+await appOpen.start();
+```
+
+### Ad events
+
+`YandexAds.events` reports the lifecycle of every ad the plugin creates —
+loads, failures, impressions, clicks, dismissals and rewards — with the ad
+unit and the impression payload that carries revenue data.
+
+```dart
+YandexAds.events.listen((event) {
+  analytics.log(event.type.name, {
+    'format': event.format.name,
+    'adUnitId': event.adUnitId,
+  });
+});
+```
+
+The stream is local to the app: the plugin never sends these events anywhere.
+
 ### Managed banner refresh
 
 `ManagedBannerAdController` refreshes only while its widget is visible and the
 application is resumed. It prevents overlapping loads and pauses the interval
 outside visible time. The existing `BannerAd` remains manual and unchanged.
+
+Visibility is measured as the share of the placement on screen, clipped by both
+the window and the surrounding scroll view. The refresh clock runs only above
+`visibilityThreshold` (0.5 by default), and the controller reports
+`visibleFraction` and the accumulated `viewableDuration` for reporting.
 
 ```dart
 late final managedBanner = ManagedBannerAdController(
