@@ -143,6 +143,7 @@ class BannerAd with _Ad {
   }
 
   Future<void> _invokeLoad(AdRequest adRequest) async {
+    _eventListener.adUnitId = adRequest.adUnitId;
     final map = adRequest._toMap();
     map[_adUnitIdKey] = adRequest.adUnitId;
     map['parameters'] = {

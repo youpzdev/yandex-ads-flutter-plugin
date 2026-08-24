@@ -14,7 +14,7 @@ class InterstitialAdLoader extends _FullscreenAdLoader {
   static const _channelPath = 'interstitialAdLoader';
 
   InterstitialAdLoader() {
-    _init('interstitialAdLoader', _channelPath);
+    _init('interstitialAdLoader', _channelPath, AdFormat.interstitial);
   }
 
   /// Loads an interstitial ad with the given [AdRequest].

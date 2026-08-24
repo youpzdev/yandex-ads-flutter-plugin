@@ -11,6 +11,8 @@ part of '../mobile_ads.dart';
 
 class _FullScreenAdEventListener {
   final String channelName;
+  final AdFormat format;
+  final String? adUnitId;
 
   /// Notifies that the ad has been shown.
   final void Function()? onAdShown;
@@ -36,6 +38,8 @@ class _FullScreenAdEventListener {
 
   _FullScreenAdEventListener({
     required this.channelName,
+    required this.format,
+    this.adUnitId,
     this.onAdShown,
     this.onAdFailedToShow,
     this.onAdDismissed,
@@ -56,27 +60,33 @@ class _FullScreenAdEventListener {
       (result) {
         switch (_FullScreenAdCallbackName.find(result['name'])) {
           case _FullScreenAdCallbackName.onAdShown:
+            _emit(AdEventType.shown);
             onAdShown?.call();
             break;
           case _FullScreenAdCallbackName.onAdFailedToShow:
             final error = AdError(result['description']);
             _completeTerminal(result);
+            _emit(AdEventType.failedToShow, error: error);
             onAdFailedToShow?.call(error);
             break;
           case _FullScreenAdCallbackName.onAdClicked:
+            _emit(AdEventType.clicked);
             onAdClicked?.call();
             break;
           case _FullScreenAdCallbackName.onAdDismissed:
             _completeTerminal(result);
+            _emit(AdEventType.dismissed);
             onAdDismissed?.call();
             break;
           case _FullScreenAdCallbackName.onAdImpression:
-            onAdImpression?.call(
-              _SimpleImpressionData(rawData: result['impressionData'] ?? ""),
-            );
+            final impressionData =
+                _SimpleImpressionData(rawData: result['impressionData'] ?? "");
+            _emit(AdEventType.impression, impressionData: impressionData);
+            onAdImpression?.call(impressionData);
             break;
           case _FullScreenAdCallbackName.onRewarded:
             reward = Reward._(result['type'], result['amount']);
+            _emit(AdEventType.rewarded, reward: reward);
             onRewarded?.call(reward!);
             break;
           default:
@@ -95,6 +105,22 @@ class _FullScreenAdEventListener {
           );
         }
       },
+    );
+  }
+
+  void _emit(
+    AdEventType type, {
+    ImpressionData? impressionData,
+    Reward? reward,
+    Object? error,
+  }) {
+    _AdEventBus.emit(
+      type: type,
+      format: format,
+      adUnitId: adUnitId,
+      impressionData: impressionData,
+      reward: reward,
+      error: error,
     );
   }
 

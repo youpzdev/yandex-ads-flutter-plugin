@@ -16,6 +16,9 @@ class _BannerAdEventListener {
 
   StreamSubscription? _subscription;
 
+  /// Ad unit of the request in flight, for telemetry.
+  String? adUnitId;
+
   _BannerAdEventListener({
     required this.channelName,
     required this.loadStateController,
@@ -32,31 +35,49 @@ class _BannerAdEventListener {
       final map = result as Map;
       switch (_CallbackName.find(map['name'])) {
         case _CallbackName.onAdLoaded:
+          _AdEventBus.emit(
+            type: AdEventType.loaded,
+            format: AdFormat.banner,
+            adUnitId: adUnitId,
+          );
           loadStateController.add(
             BannerAdLoadStateLoaded(width: map['width'], height: map['height']),
           );
           break;
         case _CallbackName.onAdFailedToLoad:
-          loadStateController.add(
-            BannerAdLoadStateError(
-              error: AdRequestError(
-                map['code'],
-                map['description'],
-                map['adUnitId'],
-              ),
-            ),
+          final error = AdRequestError(
+            map['code'],
+            map['description'],
+            map['adUnitId'],
           );
+          _AdEventBus.emit(
+            type: AdEventType.failedToLoad,
+            format: AdFormat.banner,
+            adUnitId: map['adUnitId'] as String? ?? adUnitId,
+            error: error,
+          );
+          loadStateController.add(BannerAdLoadStateError(error: error));
           break;
         case _CallbackName.onAdClicked:
+          _AdEventBus.emit(
+            type: AdEventType.clicked,
+            format: AdFormat.banner,
+            adUnitId: adUnitId,
+          );
           eventsController.add(BannerAdClickedEvent());
           break;
         case _CallbackName.onImpression:
+          final impressionData = _SimpleImpressionData(
+            rawData: map['impressionData'] ?? "",
+          );
+          _AdEventBus.emit(
+            type: AdEventType.impression,
+            format: AdFormat.banner,
+            adUnitId: adUnitId,
+            impressionData: impressionData,
+          );
           eventsController.add(
-            BannerAdImpressionEvent(
-              impressionData: _SimpleImpressionData(
-                rawData: map['impressionData'] ?? "",
-              ),
-            ),
+            BannerAdImpressionEvent(impressionData: impressionData),
           );
           break;
         default:

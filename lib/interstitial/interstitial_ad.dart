@@ -29,6 +29,8 @@ class InterstitialAd extends _FullscreenAd {
     await _setAdEventListener(
       eventListener: _FullScreenAdEventListener(
         channelName: '${_channel.name}.events',
+        format: AdFormat.interstitial,
+        adUnitId: adInfo?.adUnitId,
         onAdShown: eventListener.onAdShown,
         onAdFailedToShow: eventListener.onAdFailedToShow,
         onAdDismissed: eventListener.onAdDismissed,

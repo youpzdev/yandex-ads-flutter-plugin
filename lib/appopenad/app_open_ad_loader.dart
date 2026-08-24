@@ -14,7 +14,7 @@ class AppOpenAdLoader extends _FullscreenAdLoader {
   static const _channelPath = 'appOpenAdLoader';
 
   AppOpenAdLoader() {
-    _init('appOpenAdLoader', _channelPath);
+    _init('appOpenAdLoader', _channelPath, AdFormat.appOpen);
   }
 
   /// Loads an app open ad with the given [AdRequest].

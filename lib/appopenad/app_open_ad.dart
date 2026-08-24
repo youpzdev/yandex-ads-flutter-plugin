@@ -25,6 +25,8 @@ class AppOpenAd extends _FullscreenAd {
     await _setAdEventListener(
       eventListener: _FullScreenAdEventListener(
         channelName: '${_channel.name}.events',
+        format: AdFormat.appOpen,
+        adUnitId: adInfo?.adUnitId,
         onAdShown: eventListener.onAdShown,
         onAdFailedToShow: eventListener.onAdFailedToShow,
         onAdDismissed: eventListener.onAdDismissed,

@@ -194,6 +194,7 @@ class NativeAd with _Ad {
             if (_cycleFinished) return;
             _cycleFinished = true;
             _loadTimer?.cancel();
+            _emit(AdEventType.loaded);
             if (!_loadStateController.isClosed) {
               _loadStateController.add(
                 NativeAdLoadStateLoaded(
@@ -212,18 +213,20 @@ class NativeAd with _Ad {
               map['description'] as String? ?? 'Native ad failed to load.',
               map['adUnitId'] as String?,
             );
+            _emit(AdEventType.failedToLoad, error: error);
             _completeLoadError(error);
             break;
           case 'onAdClicked':
+            _emit(AdEventType.clicked);
             _eventsController.add(NativeAdClickedEvent());
             break;
           case 'onImpression':
+            final impressionData = _SimpleImpressionData(
+              rawData: map['impressionData'] as String? ?? '',
+            );
+            _emit(AdEventType.impression, impressionData: impressionData);
             _eventsController.add(
-              NativeAdImpressionEvent(
-                impressionData: _SimpleImpressionData(
-                  rawData: map['impressionData'] as String? ?? '',
-                ),
-              ),
+              NativeAdImpressionEvent(impressionData: impressionData),
             );
             break;
         }
@@ -231,6 +234,20 @@ class NativeAd with _Ad {
       onError: (Object error, StackTrace stackTrace) {
         _completeLoadError(error, stackTrace);
       },
+    );
+  }
+
+  void _emit(
+    AdEventType type, {
+    ImpressionData? impressionData,
+    Object? error,
+  }) {
+    _AdEventBus.emit(
+      type: type,
+      format: AdFormat.native,
+      adUnitId: adRequest.adUnitId,
+      impressionData: impressionData,
+      error: error,
     );
   }
 

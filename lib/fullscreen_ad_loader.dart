@@ -31,7 +31,10 @@ abstract class _FullscreenAdLoader {
   final _pendingLoads = <int, Completer<Map<String, dynamic>>>{};
   _PendingFullscreenLoad? _activeLoad;
 
-  void _init(String loaderType, String channelPath) {
+  late final AdFormat _format;
+
+  void _init(String loaderType, String channelPath, AdFormat format) {
+    _format = format;
     _id = _nextId++;
     final name = 'yandex_mobileads.$channelPath.$_id';
     _channel = MethodChannel(name);
@@ -74,6 +77,25 @@ abstract class _FullscreenAdLoader {
   }
 
   void _dispatchEvent(Map<String, dynamic> result) {
+    final name = result['name'];
+    if (name == _FullScreenAdCallbackName.onAdLoaded.name) {
+      _AdEventBus.emit(
+        type: AdEventType.loaded,
+        format: _format,
+        adUnitId: result['adUnitId'] as String?,
+      );
+    } else if (name == _FullScreenAdCallbackName.onAdFailedToLoad.name) {
+      _AdEventBus.emit(
+        type: AdEventType.failedToLoad,
+        format: _format,
+        adUnitId: result['adUnitId'] as String?,
+        error: AdRequestError(
+          result['code'] as int? ?? -1,
+          result['description'] as String? ?? 'Ad failed to load.',
+          result['adUnitId'] as String?,
+        ),
+      );
+    }
     final requestId = result['requestId'] as int?;
     if (requestId == null) return;
     final completer = _pendingLoads.remove(requestId);

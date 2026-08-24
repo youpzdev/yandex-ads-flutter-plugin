@@ -10,6 +10,7 @@
 library yandex_mobileads;
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -30,8 +31,12 @@ part 'banner/banner_ad_size.dart';
 part 'banner/banner_ad_state.dart';
 part 'banner/banner_ad.dart';
 part 'banner/managed_banner_ad.dart';
+part 'policy/ad_retry_policy.dart';
+part 'policy/ad_frequency_policy.dart';
+part 'pool/fullscreen_ad_pool.dart';
 part 'native/native_ad_state.dart';
 part 'native/native_ad.dart';
+part 'events/ad_telemetry.dart';
 part 'events/callback_name.dart';
 part 'events/fullscreen_callback_name.dart';
 part 'events/error.dart';
@@ -42,6 +47,7 @@ part 'fullscreen_ad_loader.dart';
 part 'appopenad/app_open_ad.dart';
 part 'appopenad/app_open_ad_listener.dart';
 part 'appopenad/app_open_ad_loader.dart';
+part 'appopenad/app_open_ad_controller.dart';
 part 'interstitial/interstitial_ad.dart';
 part 'interstitial/interstitial_ad_event_listener.dart';
 part 'interstitial/interstitial_ad_loader.dart';
@@ -68,6 +74,13 @@ class YandexAds {
 
   /// Returns the plugin version as a string.
   static const pluginVersion = '8.3.0';
+
+  /// Lifecycle events of every ad created by this plugin.
+  ///
+  /// Forward them to your analytics to see load failures, fill rate and
+  /// impression revenue per ad unit without wiring a callback into every
+  /// placement.
+  static Stream<AdEvent> get events => _AdEventBus.stream;
 
   /// A private constructor to prevent instancing.
   YandexAds._();

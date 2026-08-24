@@ -14,7 +14,7 @@ class RewardedAdLoader extends _FullscreenAdLoader {
   static const _channelPath = 'rewardedAdLoader';
 
   RewardedAdLoader() {
-    _init('rewardedAdLoader', _channelPath);
+    _init('rewardedAdLoader', _channelPath, AdFormat.rewarded);
   }
 
   /// Loads a rewarded ad with the given [AdRequest].
