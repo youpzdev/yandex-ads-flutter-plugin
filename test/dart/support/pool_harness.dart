@@ -32,7 +32,8 @@ class PoolHarness {
   int lastAdId = 0;
   int? _requestId;
   MockStreamHandlerEventSink? _loaderEvents;
-  MockStreamHandlerEventSink? _adEvents;
+  final _adEvents = <int, MockStreamHandlerEventSink>{};
+  int _shownAdId = 0;
 
   TestDefaultBinaryMessenger get _messenger =>
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -78,7 +79,7 @@ class PoolHarness {
 
   Future<void> waitForShow() async {
     final deadline = DateTime.now().add(const Duration(seconds: 5));
-    while (showCalls == 0 || _adEvents == null) {
+    while (showCalls == 0 || !_adEvents.containsKey(_shownAdId)) {
       if (DateTime.now().isAfter(deadline)) {
         throw StateError('The ad was never shown');
       }
@@ -109,7 +110,8 @@ class PoolHarness {
     });
   }
 
-  void emitAdEvent(Map<String, Object?> event) => _adEvents!.success(event);
+  void emitAdEvent(Map<String, Object?> event, {int? adId}) =>
+      _adEvents[adId ?? _shownAdId]!.success(event);
 
   void _installAdChannels(int adId) {
     final channel = MethodChannel('yandex_mobileads.$adPath.$adId');
@@ -118,12 +120,13 @@ class PoolHarness {
     _eventChannels.add(events);
     _messenger.setMockStreamHandler(
       events,
-      MockStreamHandler.inline(onListen: (_, sink) => _adEvents = sink),
+      MockStreamHandler.inline(onListen: (_, sink) => _adEvents[adId] = sink),
     );
     _messenger.setMockMethodCallHandler(channel, (call) async {
       switch (call.method) {
         case 'show':
           showCalls++;
+          _shownAdId = adId;
           break;
         case 'destroy':
           destroyedAds.add(adId);

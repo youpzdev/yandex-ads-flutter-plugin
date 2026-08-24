@@ -28,6 +28,9 @@ internal open class LoadListener : EventChannel.StreamHandler {
         eventBridge = null
     }
 
+    val hasListener: Boolean
+        get() = eventBridge != null
+
     fun onAdFailedToLoad(requestId: Int, error: AdRequestError) = respond(
         ON_AD_FAILED_TO_LOAD,
         mapOf(

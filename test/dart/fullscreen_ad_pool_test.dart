@@ -532,6 +532,67 @@ void main() {
     expect(outcome.reward?.amount, 10);
   });
 
+  test('an acquired ad refuses to show after a targeting change', () async {
+    final harness = PoolHarness();
+    addTearDown(harness.dispose);
+    harness.install();
+
+    const settings = MethodChannel('yandex_mobileads.mobileAds');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(settings, (call) async => null);
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(settings, null);
+    });
+
+    final pool = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+    );
+    addTearDown(pool.destroy);
+
+    await pool.start();
+    await harness.waitForLoads(1);
+    harness.completeLoaded();
+    await settle();
+
+    final ad = await pool.acquire();
+    expect(ad, isNotNull);
+
+    await YandexAds.setLocationTracking(false);
+
+    await expectLater(ad!.show(), throwsStateError);
+    expect(harness.showCalls, 0);
+
+    await ad.destroy();
+  });
+
+  test('an ad cannot be shown twice', () async {
+    final harness = PoolHarness();
+    addTearDown(harness.dispose);
+    harness.install();
+
+    final pool = FullscreenAdPool.interstitial(
+      adRequest: const AdRequest(adUnitId: 'unit'),
+    );
+    addTearDown(pool.destroy);
+
+    await pool.start();
+    await harness.waitForLoads(1);
+    harness.completeLoaded();
+    await settle();
+
+    final ad = (await pool.acquire())!;
+    await ad.setAdEventListener(eventListener: InterstitialAdEventListener());
+    await ad.show();
+
+    await expectLater(ad.show(), throwsStateError);
+    expect(harness.showCalls, 1);
+
+    harness.emitAdEvent({'name': 'onAdDismissed'});
+    await settle();
+    await ad.destroy();
+  });
+
   test('showNext reports that nothing was ready', () async {
     final harness = PoolHarness();
     addTearDown(harness.dispose);

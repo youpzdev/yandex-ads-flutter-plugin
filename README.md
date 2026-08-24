@@ -98,14 +98,16 @@ placement wants to own the ad itself; then it must destroy it.
 
 Other behaviour worth knowing:
 
-* only one full-screen ad at a time, across every pool in the process;
+* only one full-screen ad at a time, across every pool and every direct
+  `show()` in the process; an ad can also be shown only once;
 * stale ads are replaced (`timeToLive`), failed requests are repeated with a
   growing delay and jitter (`AdRetryPolicy`), and retries pause while the app
   is in the background;
 * when the retry budget runs out the pool reports
   `FullscreenAdPoolStatus.exhausted` and waits for `retry()`;
-* ads requested before `setUserConsent` or `setAgeRestricted` changed the
-  answer are dropped instead of shown.
+* ads requested before `setUserConsent`, `setAgeRestricted` or
+  `setLocationTracking` changed the answer are dropped, and an ad whose
+  settings changed before `show()` is refused.
 
 ### Pacing
 

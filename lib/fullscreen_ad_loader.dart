@@ -174,11 +174,21 @@ abstract class _FullscreenAdLoader {
       }..addAll(adRequest.parameters ?? {});
 
       pending.nativeLoadStarted = true;
+      final requestedConsent = _AdConsent.generation;
       await Future.any<void>([
         _channel.invokeMethod<void>('load', map),
         pending.completer.future.then<void>((_) {}),
       ]);
-      return await pending.completer.future;
+      final result = await pending.completer.future;
+      if (requestedConsent != _AdConsent.generation &&
+          result['name'] == _FullScreenAdCallbackName.onAdLoaded.name) {
+        unawaited(_discardOrphanAd(result['id'] as int?));
+        throw StateError(
+          'Consent, age or location settings changed while the ad was '
+          'loading. Load a new ad.',
+        );
+      }
+      return result;
     } finally {
       timeoutTimer.cancel();
       final requestId = pending.requestId;

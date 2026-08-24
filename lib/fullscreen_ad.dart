@@ -19,7 +19,19 @@ abstract class _FullscreenAd with _Ad {
   @override
   String get methodChannelName => '$channelName.$id';
 
+  final int _consentGeneration = _AdConsent.generation;
+  bool _shown = false;
+  bool _holdsScreen = false;
+  Timer? _screenGuard;
+
   _FullscreenAd({required this.channelName, required this.id, this.adInfo});
+
+  /// Whether this ad may still be shown.
+  ///
+  /// Becomes false once the ad was shown, or once consent, age or location
+  /// settings changed after it was loaded.
+  bool get canShow =>
+      !isDestroyed && !_shown && _consentGeneration == _AdConsent.generation;
 
   Future<void> _setAdEventListener({
     required _FullScreenAdEventListener eventListener,
@@ -35,13 +47,47 @@ abstract class _FullscreenAd with _Ad {
   /// about events that occur when an ad is displayed.
   Future<void> show() async {
     ensureAlive();
-    await _channel.invokeMethod<void>('show');
+    if (_shown) {
+      throw StateError('This ad was already shown.');
+    }
+    if (_consentGeneration != _AdConsent.generation) {
+      throw StateError(
+        'Consent, age or location settings changed after this ad was loaded. '
+        'Load a new ad.',
+      );
+    }
+    if (!_AdActivity.tryBegin()) {
+      throw _ScreenBusyError();
+    }
+    _shown = true;
+    _holdsScreen = true;
+    _screenGuard = Timer(const Duration(minutes: 5), _releaseScreen);
+    try {
+      await _channel.invokeMethod<void>('show');
+    } catch (_) {
+      _releaseScreen();
+      rethrow;
+    }
+    unawaited(
+      _eventListener
+          ?.waitForTerminal()
+          .then((_) => _releaseScreen(), onError: (Object _) => _releaseScreen()),
+    );
+  }
+
+  void _releaseScreen() {
+    _screenGuard?.cancel();
+    _screenGuard = null;
+    if (!_holdsScreen) return;
+    _holdsScreen = false;
+    _AdActivity.end();
   }
 
   Future waitForDismiss();
 
   @override
   Future<void> destroy() async {
+    _releaseScreen();
     await _eventListener?.dispose();
     await super.destroy();
   }

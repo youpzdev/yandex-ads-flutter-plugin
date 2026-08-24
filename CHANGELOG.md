@@ -20,8 +20,11 @@
 * `AdShowOutcome.duration` reports how long an ad held the screen, and
   `AdFrequencyPolicy.durationPenalty` turns that length into a longer gap
   before the next show.
-* Full-screen shows are serialised: a second show while one is on screen is
-  refused instead of stacking two ads.
+* Full-screen shows are serialised at the ad itself, so a direct `show()` also
+  refuses to stack a second ad on the screen or to show the same ad twice.
+* `setLocationTracking` invalidates loaded ads like `setUserConsent` and
+  `setAgeRestricted` do, and an ad whose targeting settings changed between
+  load and `show()` is refused instead of shown.
 * Ads loaded before a `setUserConsent` or `setAgeRestricted` change are dropped
   instead of being shown under an answer the user has replaced.
 
@@ -37,7 +40,10 @@
 * Reward callbacks are delivered once per view. A client callback is not proof
   of a view: verify valuable rewards on your own server.
 * The local Maven repository no longer outranks Google and Maven Central when
-  resolving the native SDK and Gradle plugins.
+  resolving the native SDK and Gradle plugins — in the plugin, in the example
+  app and in the test project.
+* Neither platform builds an ad and its channels when the Dart side has already
+  stopped listening.
 
 ### Behavior changes against upstream 8.3.0
 

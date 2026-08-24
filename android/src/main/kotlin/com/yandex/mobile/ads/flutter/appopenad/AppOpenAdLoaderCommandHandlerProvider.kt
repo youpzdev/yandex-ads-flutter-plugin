@@ -53,6 +53,7 @@ internal class AppOpenAdLoaderCommandHandlerProvider(
             override fun onAdLoaded(appOpenAd: AppOpenAd) {
                 val listener = AppOpenAdEventListener()
                 appOpenAd.setAdEventListener(listener)
+                if (!hasListener) return
                 val id = adCreator.createFullScreenAd(APP_OPEN_AD, listener) { onDestroy ->
                     AppOpenAdCommandHandlerProvider(
                         ObjectHolder(appOpenAd),

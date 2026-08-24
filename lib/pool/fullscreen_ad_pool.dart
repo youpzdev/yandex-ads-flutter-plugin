@@ -12,6 +12,11 @@
 part of '../mobile_ads.dart';
 
 /// Tracks whether a full-screen ad owns the screen right now.
+/// Raised when a full-screen ad is asked to show over another one.
+class _ScreenBusyError extends StateError {
+  _ScreenBusyError() : super('Another full-screen ad is on screen.');
+}
+
 class _AdActivity {
   static int _visibleCount = 0;
   static DateTime? _endedAt;
@@ -225,6 +230,7 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
 
   Timer? _retryTimer;
   Timer? _expiryTimer;
+  bool _showInFlight = false;
   bool _retryPending = false;
   bool _observing = false;
   bool _started = false;
@@ -514,14 +520,14 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
       }
     }
 
-    if (!_AdActivity.tryBegin()) {
+    if (_showInFlight || _AdActivity.isShowing) {
       return const AdShowOutcome._(AdShowStatus.alreadyShowing);
     }
+    _showInFlight = true;
     final reservation = _clock();
     gate?.recordShow(reservation);
-    var shown = false;
     try {
-      final outcome = await _showReserved(
+      return await _showReserved(
         gate: gate,
         reservation: reservation,
         waitFor: waitFor,
@@ -531,10 +537,8 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
         onAdDismissed: onAdDismissed,
         onRewarded: onRewarded,
       );
-      shown = outcome.isShown;
-      return outcome;
     } finally {
-      _AdActivity.end(shown: shown);
+      _showInFlight = false;
     }
   }
 
@@ -555,8 +559,15 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
     }
 
     final fullscreen = ad as _FullscreenAd;
+    if (_AdActivity.isShowing) {
+      gate?._undoShow(reservation);
+      _slots.insert(0, _PoolSlot(fullscreen, _clock(), _AdConsent.generation));
+      return const AdShowOutcome._(AdShowStatus.alreadyShowing);
+    }
+
     Reward? reward;
     AdError? failure;
+    var busy = false;
     final onScreen = Stopwatch();
 
     try {
@@ -582,6 +593,8 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
             onTimeout: () => null,
           );
       if (dismissed is Reward) reward = dismissed;
+    } on _ScreenBusyError {
+      busy = true;
     } on AdError catch (error) {
       failure ??= error;
     } on PlatformException catch (error) {
@@ -595,6 +608,11 @@ class FullscreenAdPool<T extends Object> with WidgetsBindingObserver {
         await fullscreen.destroy();
       } catch (_) {}
       unawaited(_fill());
+    }
+
+    if (busy) {
+      gate?._undoShow(reservation);
+      return const AdShowOutcome._(AdShowStatus.alreadyShowing);
     }
 
     final error = failure;

@@ -54,6 +54,7 @@ internal class RewardedAdLoaderCommandHandlerProvider(
             override fun onAdLoaded(rewarded: RewardedAd) {
                 val listener = RewardedAdEventListener()
                 rewarded.setAdEventListener(listener)
+                if (!hasListener) return
                 val id = adCreator.createFullScreenAd(REWARDED_AD, listener) {
                     RewardedAdCommandHandlerProvider(
                         ObjectHolder(rewarded),

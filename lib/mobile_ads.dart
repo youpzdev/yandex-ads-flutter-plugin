@@ -101,6 +101,7 @@ class YandexAds {
   static Future<void> setLocationTracking(bool value) async {
     await _channel.invokeMethod('setLocationTracking', value);
     _locationTracking = value;
+    _AdConsent.invalidate();
   }
 
   /// Whether the user from a GDPR country has allowed

@@ -39,6 +39,7 @@ final class FullscreenAdLoadDelegate: NSObject, FlutterStreamHandler {
 
     func reportInterstitialAdLoaded(ad: InterstitialAd, adInfo: AdInfo?, requestId: Int) {
         Task { @MainActor in
+            guard sink != nil else { return }
             let id = adCreator.createInterstitialAd(ad: ad)
             sendLoadedEvent(id: id, adInfo: adInfo, requestId: requestId)
         }
@@ -46,6 +47,7 @@ final class FullscreenAdLoadDelegate: NSObject, FlutterStreamHandler {
 
     func reportRewardedAdLoaded(ad: RewardedAd, adInfo: AdInfo?, requestId: Int) {
         Task { @MainActor in
+            guard sink != nil else { return }
             let id = adCreator.createRewardedAd(ad: ad)
             sendLoadedEvent(id: id, adInfo: adInfo, requestId: requestId)
         }
@@ -53,6 +55,7 @@ final class FullscreenAdLoadDelegate: NSObject, FlutterStreamHandler {
 
     func reportAppOpenAdLoaded(ad: AppOpenAd, adInfo: AdInfo?, requestId: Int) {
         Task { @MainActor in
+            guard sink != nil else { return }
             let id = adCreator.createAppOpenAd(ad: ad)
             sendLoadedEvent(id: id, adInfo: adInfo, requestId: requestId)
         }
