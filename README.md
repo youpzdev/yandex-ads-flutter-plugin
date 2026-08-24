@@ -8,6 +8,14 @@ for Android and iOS. The package still reports upstream SDK/plugin compatibility
 as 8.3.0; use a Git or local path dependency until the licensing question in
 [`docs/project-state.md`](docs/project-state.md) is resolved.
 
+Two upstream behaviors changed on purpose. `BannerAd.load` now completes only
+after the native side accepts the request, which requires the matching
+`AdWidget` to be mounted, and it fails with `TimeoutException` after its
+`timeout` instead of never returning. Overlapping `load` calls on the same
+banner throw `StateError` rather than racing each other. Code that loaded a
+banner before displaying its widget has to mount the widget first, or pass a
+timeout it is willing to wait for.
+
 ## Fork extensions
 
 ### Managed banner refresh
