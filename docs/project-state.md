@@ -51,4 +51,5 @@
 - Android Native API сверен через `javap` с точным `mobileads-8.3.0.aar`. Example переведён на `path: ../`; `flutter build apk --debug` успешно собрал текущий форк в `example/build/app/outputs/flutter-apk/app-debug.apk` (188959343 байта). Изолированный plugin-модуль без Flutter embedding по-прежнему не используется как критерий.
 - iOS API сверен с headers SDK 8.3.0. Swift type-check, Xcode build и iOS runtime на Windows не выполнялись.
 - Example содержит экраны Native Ads и managed banner с безопасными пресетами и официальным test unit `demo-native-content-yandex`.
+- Flutter 3.44.4 предупреждает о будущем отказе от legacy Kotlin Gradle Plugin. Корректное снятие warning для plugin требует поднять минимум до Flutter 3.44 / Dart 3.12, а полный Built-in Kotlin example — Flutter 3.47+; текущая версия сохраняет утверждённый минимум Flutter 3.27.
 - Реальный Android/iOS placement, рекламный ответ, impression/click и integration indicator требуют device smoke-test; успешная APK-сборка их не доказывает.
