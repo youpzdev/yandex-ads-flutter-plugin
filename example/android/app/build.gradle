@@ -18,7 +18,8 @@ def flutterVersionName = '1.1.0'
 android {
     namespace = "com.yandex.mobile.ads.flutter.sample"
 
-    compileSdkVersion 35
+    // AndroidX dependencies used by the sample require API 36.
+    compileSdkVersion 36
     ndkVersion flutter.ndkVersion
 
     compileOptions {

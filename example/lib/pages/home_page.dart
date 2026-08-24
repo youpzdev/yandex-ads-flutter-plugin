@@ -44,6 +44,18 @@ class HomePage extends StatelessWidget {
             onTap: () => Navigator.pushNamed(context, '/banner_inline'),
           ),
           ListTile(
+            leading: const Icon(Icons.refresh_outlined),
+            title: const Text('Managed banner refresh'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.pushNamed(context, '/banner_managed'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.view_quilt_outlined),
+            title: const Text('Native ad'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.pushNamed(context, '/native'),
+          ),
+          ListTile(
             leading: const Icon(Icons.fullscreen_outlined),
             title: const Text('Interstitial'),
             trailing: const Icon(Icons.chevron_right),

@@ -24,7 +24,9 @@ dependencies:
     sdk: flutter
   url_launcher: ^6.3.0
   shared_preferences: ^2.0.15
-  yandex_mobileads: ^8.3.0
+  # Keep the sample on the fork source so it exercises the APIs in this repo.
+  yandex_mobileads:
+    path: ../
 dev_dependencies:
   flutter_test:
     sdk: flutter

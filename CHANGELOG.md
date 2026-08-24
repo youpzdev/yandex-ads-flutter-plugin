@@ -1,5 +1,17 @@
 # Change Log
 
+## Unreleased — maintained fork
+
+* Added Android and iOS Native Ads with SDK-bound compact/media templates,
+  safe style presets, layout validation, early-event buffering and cancellable
+  loading.
+* Added visibility- and lifecycle-aware managed banner refresh with 30, 60 and
+  120 second policy presets.
+* Made initialization, fullscreen loading/showing and resource destruction
+  awaitable, retryable, timeout-aware and idempotent.
+* Added Dart lifecycle and policy contract tests.
+* Raised the minimum Flutter version to 3.27 for stable ARGB serialization.
+
 ## Version 8.3.0
 * Supported Android Yandex Mobile Ads version 8.3.0
 * Supported iOS Yandex Mobile Ads version 8.3.0

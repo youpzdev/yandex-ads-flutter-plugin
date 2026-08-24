@@ -1,6 +1,89 @@
-# Mobile Ads Flutter Plugin
+# Yandex Mobile Ads Flutter Plugin — maintained fork
 
 Flutter plugin for the Yandex Ads SDK. The plugin allows Flutter developers to integrate the Yandex Ads SDK into Android and iOS apps.
+
+This repository is a source-compatible fork of `yandex_mobileads` 8.3.0. It adds
+awaitable lifecycle operations, managed banner refresh and SDK-bound Native Ads
+for Android and iOS. The package still reports upstream SDK/plugin compatibility
+as 8.3.0; use a Git or local path dependency until the licensing question in
+[`docs/project-state.md`](docs/project-state.md) is resolved.
+
+## Fork extensions
+
+### Managed banner refresh
+
+`ManagedBannerAdController` refreshes only while its widget is visible and the
+application is resumed. It prevents overlapping loads and pauses the interval
+outside visible time. The existing `BannerAd` remains manual and unchanged.
+
+```dart
+late final managedBanner = ManagedBannerAdController(
+  adSize: const BannerAdSize.inline(width: 320, maxHeight: 100),
+  adRequest: const AdRequest(adUnitId: 'demo-banner-yandex'),
+  refreshPolicy: ManagedBannerRefreshPolicy.standard,
+);
+
+// In build():
+ManagedBannerAdWidget(controller: managedBanner)
+
+// Await from the owning State/service when the placement is retired:
+await managedBanner.destroy();
+```
+
+Refresh presets are `conservative` (120 seconds), `standard` (60 seconds) and
+`engaged` (30 seconds). Custom refresh and retry intervals shorter than 30
+seconds are rejected. Reloading keeps the placement footprint stable, but the
+current implementation does not maintain two simultaneous banner instances to
+guarantee that the previous creative remains visible during replacement.
+
+### Native Ads
+
+Native Ads use a native SDK-bound template view, so required assets, feedback,
+media and click handling stay under Yandex Mobile Ads SDK control.
+
+```dart
+final nativeAd = NativeAd(
+  adRequest: const AdRequest(adUnitId: 'demo-native-content-yandex'),
+  width: 324,
+  height: 364,
+  template: NativeAdTemplate.media,
+  style: NativeAdStyle.brandSafe,
+);
+
+// Mount this first; load() also has a timeout that covers waiting for the view.
+NativeAdWidget(nativeAd: nativeAd)
+
+await nativeAd.load();
+
+// When the placement is retired:
+await nativeAd.destroy();
+```
+
+Available template minimums are:
+
+| Template | Minimum logical size | Media height |
+| --- | ---: | ---: |
+| `compact` | 324 × 344 | 160 |
+| `media` | 324 × 364 | 180 |
+
+Both templates reserve a media width of at least 300 logical pixels and 64 × 64
+interactive assets. The built-in style presets are `light`, `dark` and
+`brandSafe`; a custom `NativeAdStyle` may override bounded colors, corner radius
+and padding. A load timeout sends `cancelLoading` to native code and suppresses
+late callbacks.
+
+### Lifecycle behavior
+
+- SDK initialization can be retried after a platform failure.
+- Full-screen loader timeouts cover SDK initialization, loader creation and the
+  native request. Cancel and destroy complete pending Dart futures.
+- `show()` and `destroy()` are awaitable. Full-screen ads expose terminal
+  dismissal/failure state without leaking unhandled async errors.
+- Destroy operations are idempotent; using a destroyed ad or loader fails
+  explicitly.
+
+See [`docs/decision-log.md`](docs/decision-log.md) for the decisions and rejected
+alternatives behind these contracts.
 
 ## Documentation
 

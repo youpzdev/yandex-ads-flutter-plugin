@@ -14,6 +14,8 @@ import 'package:yandex_mobileads_sample/policies/policies_page.dart';
 import 'pages/banner_ad_page.dart';
 import 'pages/home_page.dart';
 import 'pages/interstitial_ad_page.dart';
+import 'pages/managed_banner_page.dart';
+import 'pages/native_ad_page.dart';
 import 'pages/rewarded_ad_page.dart';
 
 void main() => runApp(const YandexMobileAdsApp());
@@ -60,6 +62,8 @@ class YandexMobileAdsApp extends StatelessWidget {
             title: 'Inline banner ad',
           );
         },
+        '/banner_managed': (context) => const ManagedBannerPage(),
+        '/native': (context) => const NativeAdPage(),
         '/interstitial': (context) => const InterstitialAdPage(),
         '/rewarded': (context) => const RewardedAdPage(),
         '/policies': (context) => const PoliciesPage(),
