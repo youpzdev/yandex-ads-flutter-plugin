@@ -471,8 +471,13 @@ private final class NativeAdTemplateView: NativeAdView {
         icon.contentMode = .scaleAspectFit
         icon.widthAnchor.constraint(equalToConstant: NativeAdLayoutSize.minimumInteractiveSize).isActive = true
         icon.heightAnchor.constraint(equalToConstant: NativeAdLayoutSize.minimumInteractiveSize).isActive = true
-        feedback.widthAnchor.constraint(equalToConstant: NativeAdLayoutSize.minimumInteractiveSize).isActive = true
-        feedback.heightAnchor.constraint(equalToConstant: NativeAdLayoutSize.minimumInteractiveSize).isActive = true
+        feedback.widthAnchor.constraint(
+            equalToConstant: NativeAdLayoutSize.feedbackTouchSize
+        ).isActive = true
+        feedback.heightAnchor.constraint(
+            equalToConstant: NativeAdLayoutSize.feedbackTouchSize
+        ).isActive = true
+        feedback.contentEdgeInsets = .init(top: 12, left: 12, bottom: 12, right: 12)
         callToAction.heightAnchor.constraint(greaterThanOrEqualToConstant: NativeAdLayoutSize.minimumInteractiveSize).isActive = true
         media.translatesAutoresizingMaskIntoConstraints = false
         mediaHeight.isActive = true
@@ -574,6 +579,7 @@ private final class NativeAdTemplateView: NativeAdView {
 private enum NativeAdLayoutSize {
     static let minimumMediaWidth: CGFloat = 300
     static let minimumInteractiveSize: CGFloat = 64
+    static let feedbackTouchSize: CGFloat = 48
     static let stackSpacing: CGFloat = 8
     static let stackGapCount: CGFloat = 5
     static let metadataLine: CGFloat = 20

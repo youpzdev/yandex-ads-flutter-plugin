@@ -32,6 +32,9 @@
 
 ### Fixed in the native bridge
 
+* The native ad feedback button drew its icon at the full 64 dp touch target,
+  so the three dots dwarfed the creative. The icon is now 24 dp inside a 48 dp
+  target on both platforms.
 * Native ads never loaded on Android: the view called `NativeAdLoader
   .cancelLoading()` right before every request, and the cancelled loader then
   answered nothing at all — no ad, no error — so the Dart side waited out its

@@ -288,7 +288,11 @@ internal class FlutterNativeAdView(
             textSize = BODY_TEXT_SIZE_SP
             maxLines = BODY_MAX_LINES
         }
-        val feedback = ImageView(context)
+        val feedbackPadding = FEEDBACK_PADDING_DP.toPx(density)
+        val feedback = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(feedbackPadding, feedbackPadding, feedbackPadding, feedbackPadding)
+        }
         val favicon = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
@@ -320,7 +324,13 @@ internal class FlutterNativeAdView(
             marginStart = HEADER_GAP_DP.toPx(density)
             marginEnd = HEADER_GAP_DP.toPx(density)
         })
-        header.addView(feedback, fixed(MINIMUM_INTERACTIVE_SIZE_DP.toPx(density), MINIMUM_INTERACTIVE_SIZE_DP.toPx(density)))
+        header.addView(
+            feedback,
+            fixed(
+                FEEDBACK_TOUCH_SIZE_DP.toPx(density),
+                FEEDBACK_TOUCH_SIZE_DP.toPx(density),
+            ),
+        )
         content.addView(header, matchWidth(wrapContent()))
         content.addView(media, matchWidth(mediaHeightDp.toPx(density)))
         metadata.addView(favicon, fixed(FAVICON_SIZE_DP.toPx(density), FAVICON_SIZE_DP.toPx(density)).apply {
@@ -441,6 +451,8 @@ internal class FlutterNativeAdView(
         const val CTA_TOP_MARGIN_DP = 8
         const val MINIMUM_MEDIA_WIDTH_DP = 300
         const val MINIMUM_INTERACTIVE_SIZE_DP = 64
+        const val FEEDBACK_TOUCH_SIZE_DP = 48
+        const val FEEDBACK_PADDING_DP = 12
         const val STACK_SPACING_DP = 8
         const val STACK_GAP_COUNT = 5
         const val METADATA_LINE_DP = 20
